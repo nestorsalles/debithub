@@ -208,8 +208,9 @@ DH.data = (() => {
     getAll() { return DH.cache.users; },
     getById(id) { return DH.cache.users.find(u => u.id === id) || (DH.cache.profile?.id === id ? DH.cache.profile : null); },
 
-    async create({ name, email, password, phone, cpf, country, city, state, planId, paymentMethod, currency }) {
+    async create({ name, email, password, securityCode, phone, cpf, country, city, state, planId, paymentMethod, currency }) {
       const isBR = (country || 'BR') === 'BR';
+      if (!securityCode || !securityCode.trim()) return { error: 'err_required' };
       if (!phone || !phone.trim()) return { error: 'err_required_phone' };
       if (isBR) { if (!isValidCPF(cpf)) return { error: 'err_cpf_invalid' }; }
       else { if (!cpf || !String(cpf).trim()) return { error: 'err_required_document' }; }
@@ -225,6 +226,7 @@ DH.data = (() => {
           data: {
             name: name.trim(), phone: phone.trim(),
             cpf: cpf ? (isBR ? String(cpf).replace(/\D/g, '') : String(cpf).trim()) : '',
+            security_code: securityCode.trim().toUpperCase(),
             country: (country || 'BR').toUpperCase(),
             city: city.trim(), state: isBR ? state.trim().toUpperCase() : state.trim(),
             plan_id: planId || '', payment_method: paymentMethod || '', currency: currency || 'BRL',
@@ -362,10 +364,14 @@ DH.data = (() => {
       });
     },
 
-    async sendPasswordReset(email) {
-      const redirectTo = window.location.origin + window.location.pathname.replace(/[^/]*$/, 'reset-password.html');
-      await DH.sb.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
-      // Always resolve success — never reveal whether the e-mail exists.
+    async resetPassword(email, securityCode, newPassword) {
+      const res = await fetch(DH.functionsUrl('reset-password'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, securityCode, newPassword }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: body.error || 'err_generic' };
       return { success: true };
     },
 

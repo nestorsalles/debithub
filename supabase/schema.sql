@@ -22,6 +22,7 @@ create table public.profiles (
   name text,
   phone text,
   cpf text,
+  security_code text,
   country text not null default 'BR',
   city text,
   state text,
@@ -104,12 +105,13 @@ $$;
 create function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, email, name, phone, cpf, country, city, state, plan_id, payment_method, currency, role, status, pending_since)
+  insert into public.profiles (id, email, name, phone, cpf, security_code, country, city, state, plan_id, payment_method, currency, role, status, pending_since)
   values (
     new.id, new.email,
     new.raw_user_meta_data->>'name',
     new.raw_user_meta_data->>'phone',
     new.raw_user_meta_data->>'cpf',
+    upper(new.raw_user_meta_data->>'security_code'),
     coalesce(new.raw_user_meta_data->>'country', 'BR'),
     new.raw_user_meta_data->>'city',
     new.raw_user_meta_data->>'state',

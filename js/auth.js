@@ -290,6 +290,7 @@ DH.auth = (() => {
 
   const REGISTER_ERROR_FIELD = {
     err_email_taken: 'reg-email',
+    err_required: 'reg-security-code',
     err_required_phone: 'reg-phone',
     err_cpf_invalid: 'reg-cpf',
     err_required_document: 'reg-cpf',
@@ -314,6 +315,7 @@ DH.auth = (() => {
     const email         = document.getElementById('reg-email').value.trim();
     const password      = document.getElementById('reg-password').value;
     const confirmPwd    = document.getElementById('reg-confirm-password').value;
+    const securityCode  = document.getElementById('reg-security-code').value.trim();
     const isBR          = country === 'BR';
 
     let valid = true;
@@ -330,13 +332,14 @@ DH.auth = (() => {
     if (!password)     { showError('reg-password', DH.i18n.t('err_required')); valid = false; }
     else if (password.length < 6) { showError('reg-password', DH.i18n.t('err_password_min')); valid = false; }
     if (password !== confirmPwd)  { showError('reg-confirm-password', DH.i18n.t('err_passwords_match')); valid = false; }
+    if (!securityCode) { showError('reg-security-code', DH.i18n.t('err_required')); valid = false; }
     if (!valid) return;
 
     const submitBtn = document.getElementById('btn-register');
     if (submitBtn) submitBtn.disabled = true;
     let result;
     try {
-      result = await DH.data.users.create({ name, email, password, phone, cpf, country, city, state, planId, paymentMethod, currency });
+      result = await DH.data.users.create({ name, email, password, securityCode, phone, cpf, country, city, state, planId, paymentMethod, currency });
     } catch {
       result = { error: 'err_generic' };
     } finally {
@@ -353,7 +356,7 @@ DH.auth = (() => {
   }
 
   /* ════════════════════════════════
-     FORGOT PASSWORD (e-mail link, via Supabase Auth)
+     FORGOT PASSWORD (security code, no e-mail needed)
   ════════════════════════════════ */
   function initForgotPassword() {
     const link    = document.getElementById('forgot-link');
@@ -370,6 +373,7 @@ DH.auth = (() => {
     });
 
     form.addEventListener('submit', handleForgotPassword);
+    updateStrengthBar('forgot-new-password', 'forgot-strength-bar', 'forgot-strength-text');
   }
 
   function openForgotModal() {
@@ -384,15 +388,37 @@ DH.auth = (() => {
   async function handleForgotPassword(e) {
     e.preventDefault();
     clearAllErrors();
-    const email = document.getElementById('forgot-email').value.trim();
+    const email        = document.getElementById('forgot-email').value.trim();
+    const securityCode = document.getElementById('forgot-security-code').value.trim();
+    const newPassword  = document.getElementById('forgot-new-password').value;
 
     let valid = true;
     if (!email) { showError('forgot-email', DH.i18n.t('err_required')); valid = false; }
     else if (!validateEmail(email)) { showError('forgot-email', DH.i18n.t('err_email_invalid')); valid = false; }
+    if (!securityCode) { showError('forgot-security-code', DH.i18n.t('err_required')); valid = false; }
+    if (!newPassword) { showError('forgot-new-password', DH.i18n.t('err_required')); valid = false; }
+    else if (newPassword.length < 6) { showError('forgot-new-password', DH.i18n.t('err_password_min')); valid = false; }
     if (!valid) return;
 
-    await DH.data.users.sendPasswordReset(email);
-    toast(DH.i18n.t('toast_password_reset_sent'), 'success');
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    let result;
+    try {
+      result = await DH.data.users.resetPassword(email, securityCode, newPassword);
+    } catch {
+      result = { error: 'err_generic' };
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+
+    if (result.error) {
+      if (result.error === 'err_user_not_found') showError('forgot-email', DH.i18n.t(result.error));
+      else if (result.error === 'err_security_code_wrong') showError('forgot-security-code', DH.i18n.t(result.error));
+      else showError('forgot-new-password', DH.i18n.t('err_generic'));
+      return;
+    }
+
+    toast(DH.i18n.t('toast_password_reset'), 'success');
     closeForgotModal();
     document.getElementById('forgot-form').reset();
   }
