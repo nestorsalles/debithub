@@ -201,37 +201,31 @@ DH.admin = (() => {
         ${filtered.length === 0
           ? DH.ui.emptyState('users', 'admin_empty', 'admin_empty_sub')
           : `<div class="table-wrapper">
-              <table class="table">
+              <table class="table table-compact">
                 <thead>
                   <tr>
                     <th>${T('admin_col_name')}</th>
-                    <th>${T('admin_col_email')}</th>
                     <th>${T('admin_col_phone')}</th>
                     <th>${T('admin_col_cpf')}</th>
                     <th>${T('admin_col_location')}</th>
-                    <th>${T('admin_col_country')}</th>
                     <th>${T('admin_col_created')}</th>
                     <th>${T('admin_col_account_status')}</th>
                     <th>${T('admin_col_status')}</th>
-                    <th>${T('admin_col_credores')}</th>
-                    <th>${T('admin_col_debitos')}</th>
+                    <th title="${T('admin_col_credores')} / ${T('admin_col_debitos')}">${T('admin_col_credores')} / ${T('admin_col_debitos')}</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   ${filtered.map(a => `
                     <tr>
-                      <td><strong>${escapeHtml(a.name)}</strong></td>
-                      <td class="text-muted">${escapeHtml(a.email)}</td>
+                      <td><strong>${escapeHtml(a.name)}</strong><div class="text-xs text-muted">${escapeHtml(a.email)}</div></td>
                       <td class="text-muted">${escapeHtml(a.phone) || '—'}</td>
                       <td class="text-muted">${escapeHtml(a.cpf) || '—'}</td>
-                      <td class="text-muted">${a.city ? escapeHtml(a.city) + '/' + escapeHtml(a.state) : '—'}</td>
-                      <td class="text-muted">${countryName(a.country)}</td>
+                      <td class="text-muted">${a.city ? escapeHtml(a.city) + '/' + escapeHtml(a.state) : '—'}<div class="text-xs text-muted">${countryName(a.country)}</div></td>
                       <td>${DH.ui.fmtDate(a.createdAt.split('T')[0])}</td>
                       <td>${accountStatusBadge(a.status)}</td>
                       <td>${statusBadge(a.current)}</td>
-                      <td>${a.credCount}</td>
-                      <td>${a.debitCount}</td>
+                      <td title="${a.credCount} ${T('admin_col_credores')} · ${a.debitCount} ${T('admin_col_debitos')}">${a.credCount} / ${a.debitCount}</td>
                       <td>
                         <div style="display:flex;gap:.3rem;justify-content:flex-end;flex-wrap:wrap;">
                           <button class="btn-icon btn-icon-success" title="${T('admin_modal_mark_paid')}" data-icon="dollar-sign"
@@ -444,7 +438,7 @@ DH.admin = (() => {
     DH.ui.openModal('billing-modal-overlay');
   }
 
-  function saveBilling() {
+  async function saveBilling() {
     clearBillingErrors();
     const id      = document.getElementById('billing-id').value;
     const userId  = document.getElementById('billing-user').value;
@@ -464,13 +458,13 @@ DH.admin = (() => {
     if (!valid) return;
 
     if (id) {
-      DH.data.billing.update(id, { method, plan, amount, date, note });
+      await DH.data.billing.update(id, { method, plan, amount, date, note });
       DH.ui.showToast(T('toast_payment_updated'), 'success');
     } else {
-      DH.data.billing.create({ userId, method, plan, amount, date, note });
+      await DH.data.billing.create({ userId, method, plan, amount, date, note });
       DH.ui.showToast(T('toast_payment_created'), 'success');
     }
-    if (activate) DH.data.users.setStatus(userId, 'active');
+    if (activate) await DH.data.users.setStatus(userId, 'active');
     DH.ui.closeModal('billing-modal-overlay');
     renderAll();
   }
@@ -532,8 +526,8 @@ DH.admin = (() => {
   }
 
   function deleteBillingRecord(recordId, userId) {
-    DH.ui.confirm(T('admin_history_delete_confirm'), () => {
-      DH.data.billing.delete(recordId);
+    DH.ui.confirm(T('admin_history_delete_confirm'), async () => {
+      await DH.data.billing.delete(recordId);
       DH.ui.showToast(T('toast_payment_deleted'), 'info');
       openHistoryModal(userId);
       if (currentView === 'billing') renderBilling();
@@ -548,14 +542,14 @@ DH.admin = (() => {
      within 24h they auto-suspend (see DH.data.users.syncExpiredPending) —
      their debt data is never touched by any of this.
   ════════════════════════════════ */
-  function activateAccount(userId) {
-    DH.data.users.setStatus(userId, 'active');
+  async function activateAccount(userId) {
+    await DH.data.users.setStatus(userId, 'active');
     DH.ui.showToast(T('toast_account_activated'), 'success');
     renderAll();
   }
 
-  function suspendAccount(userId) {
-    DH.data.users.setStatus(userId, 'suspended');
+  async function suspendAccount(userId) {
+    await DH.data.users.setStatus(userId, 'suspended');
     DH.ui.showToast(T('toast_account_suspended'), 'info');
     renderAll();
   }
@@ -658,7 +652,7 @@ DH.admin = (() => {
     DH.ui.openModal('account-modal-overlay');
   }
 
-  function saveAccount() {
+  async function saveAccount() {
     const userId = document.getElementById('account-id').value;
     if (!userId) return;
     const name    = document.getElementById('account-name').value.trim();
@@ -673,15 +667,16 @@ DH.admin = (() => {
 
     if (!name) { DH.ui.showToast(T('err_required'), 'error'); return; }
 
-    DH.data.users.adminUpdate(userId, { name, phone, cpf, country, city, state, planId, currency, paymentMethod });
+    await DH.data.users.adminUpdate(userId, { name, phone, cpf, country, city, state, planId, currency, paymentMethod });
     DH.ui.showToast(T('toast_account_updated'), 'success');
     DH.ui.closeModal('account-modal-overlay');
     renderAll();
   }
 
   function deleteAccount(userId) {
-    DH.ui.confirm(T('admin_delete_account_confirm'), () => {
-      DH.data.users.delete(userId);
+    DH.ui.confirm(T('admin_delete_account_confirm'), async () => {
+      const result = await DH.data.users.delete(userId);
+      if (result.error) { DH.ui.showToast(T('err_generic'), 'error'); return; }
       DH.ui.showToast(T('toast_account_deleted'), 'info');
       renderAll();
     });
@@ -777,7 +772,7 @@ DH.admin = (() => {
     DH.ui.openModal('plan-modal-overlay');
   }
 
-  function savePlan() {
+  async function savePlan() {
     clearPlanErrors();
     const id     = document.getElementById('plan-id').value;
     const name   = document.getElementById('plan-name').value.trim();
@@ -794,10 +789,10 @@ DH.admin = (() => {
     if (!valid) return;
 
     if (id) {
-      DH.data.plans.update(id, { name, prices, period });
+      await DH.data.plans.update(id, { name, prices, period });
       DH.ui.showToast(T('toast_plan_updated'), 'success');
     } else {
-      DH.data.plans.create({ name, prices, period });
+      await DH.data.plans.create({ name, prices, period });
       DH.ui.showToast(T('toast_plan_created'), 'success');
     }
     DH.ui.closeModal('plan-modal-overlay');
@@ -805,9 +800,9 @@ DH.admin = (() => {
   }
 
   function deletePlan(planId) {
-    DH.ui.confirm(T('admin_plan_delete_confirm'), () => {
-      const result = DH.data.plans.delete(planId);
-      if (result.error) { DH.ui.showToast(T(result.error), 'error'); return; }
+    DH.ui.confirm(T('admin_plan_delete_confirm'), async () => {
+      const result = await DH.data.plans.delete(planId);
+      if (result && result.error) { DH.ui.showToast(T(result.error), 'error'); return; }
       DH.ui.showToast(T('toast_plan_deleted'), 'info');
       renderAll();
     });
@@ -908,10 +903,10 @@ DH.admin = (() => {
     DH.auth.initDashboard();
   }
 
-  function saveProfileName() {
+  async function saveProfileName() {
     const name = document.getElementById('settings-name')?.value?.trim();
     if (!name) return;
-    DH.data.users.updateName(DH.state.currentUser.id, name);
+    await DH.data.users.updateName(DH.state.currentUser.id, name);
     DH.ui.showToast(T('toast_profile_updated'), 'success');
     document.getElementById('user-avatar-btn').textContent = DH.ui.getInitials(name);
     document.getElementById('dropdown-user-name').textContent = name;

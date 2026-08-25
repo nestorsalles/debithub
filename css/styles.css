@@ -331,6 +331,16 @@ h4 { font-size: 1rem; }
 .table tbody tr { transition: background var(--transition-fast); }
 .table tbody tr:hover { background: var(--surface-2); }
 
+/* Denser variant for wide admin tables (e.g. Contas) so more columns fit
+   without forcing the user to zoom the page out. */
+.table-compact th { padding: 0.55rem 0.55rem; font-size: 0.64rem; white-space: nowrap; }
+.table-compact td { padding: 0.55rem 0.55rem; font-size: 0.8rem; white-space: nowrap; }
+.table-compact td .text-xs { white-space: normal; }
+.table-compact td:last-child { white-space: normal; }
+.table-compact td:first-child { white-space: normal; max-width: 200px; }
+.table-compact .btn-icon { width: 30px; height: 30px; }
+.table-compact td:last-child > div { gap: 0.2rem; }
+
 /* ── Modal ── */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 1000;

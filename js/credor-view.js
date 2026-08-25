@@ -2,8 +2,8 @@
    DebitHub — Public Creditor View
    Renders the public-facing page at credor.html#d=<encoded-data>
    The data travels inside the link itself (self-contained snapshot),
-   so the page works for anyone, on any device — no login required.
-   A legacy credor.html#slug hash still works as a same-browser fallback.
+   so the page works for anyone, on any device — no login required,
+   and no call to Supabase at all.
    ============================================================ */
 
 window.DH = window.DH || {};
@@ -43,16 +43,11 @@ DH.credorView = (() => {
 
     if (!hash) { currentData = null; renderNotFound(); return; }
 
-    if (hash.startsWith('d=')) {
-      const decoded = DH.data.share.decode(hash.slice(2));
-      if (!decoded || !decoded.credor) { currentData = null; renderNotFound(); return; }
-      currentData = decoded;
-    } else {
-      // Legacy same-browser lookup (only works if this browser holds the data)
-      const credor = DH.data.credores.getBySlug(hash);
-      if (!credor) { currentData = null; renderNotFound(); return; }
-      currentData = DH.data.credores.snapshotFor(credor.id);
-    }
+    if (!hash.startsWith('d=')) { currentData = null; renderNotFound(); return; }
+
+    const decoded = DH.data.share.decode(hash.slice(2));
+    if (!decoded || !decoded.credor) { currentData = null; renderNotFound(); return; }
+    currentData = decoded;
 
     renderDashboard();
   }

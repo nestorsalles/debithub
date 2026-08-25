@@ -1,6 +1,6 @@
 /* ============================================================
    DebitHub — Authentication Module
-   Handles: login, register, forgot password, change password
+   Handles: login, register, forgot password (by e-mail), change password
    ============================================================ */
 
 window.DH = window.DH || {};
@@ -58,18 +58,16 @@ DH.auth = (() => {
         const inp = document.getElementById(targetId);
         if (!inp) return;
         if (inp.type === 'password') {
-          // Now visible — eye icon shows "cut" (slashed) to signal it's exposed.
           inp.type = 'text';
           btn.setAttribute('data-icon', 'eye-off');
         } else {
-          // Now hidden — eye icon shows normal (open) to signal it's protected.
           inp.type = 'password';
           btn.setAttribute('data-icon', 'eye');
         }
         btn.removeAttribute('data-icon-mounted');
         DH.icons.mount(btn);
         btn.classList.remove('icon-toggle-animate');
-        void btn.offsetWidth; // restart the animation on every click
+        void btn.offsetWidth;
         btn.classList.add('icon-toggle-animate');
       });
     });
@@ -83,20 +81,15 @@ DH.auth = (() => {
     headers.forEach(header => {
       header.addEventListener('click', () => {
         const isActive = header.classList.contains('active');
-        // Close all
         document.querySelectorAll('.tab-header').forEach(h => h.classList.remove('active'));
         document.querySelectorAll('.tab-body').forEach(b => b.classList.remove('open'));
-        // Open clicked (if wasn't active)
         if (!isActive) {
           header.classList.add('active');
           const body = header.nextElementSibling;
-          if (body && body.classList.contains('tab-body')) {
-            body.classList.add('open');
-          }
+          if (body && body.classList.contains('tab-body')) body.classList.add('open');
         }
       });
     });
-    // Open first tab by default
     if (headers.length > 0) {
       headers[0].classList.add('active');
       const firstBody = headers[0].nextElementSibling;
@@ -110,12 +103,10 @@ DH.auth = (() => {
   function initLoginForm() {
     const form = document.getElementById('login-form');
     if (!form) return;
-
     form.addEventListener('submit', handleLogin);
-    form.addEventListener('keydown', e => { if (e.key === 'Enter') handleLogin(e); });
   }
 
-  function handleLogin(e) {
+  async function handleLogin(e) {
     e.preventDefault();
     clearAllErrors();
     const email    = document.getElementById('login-email').value.trim();
@@ -127,17 +118,23 @@ DH.auth = (() => {
     if (!password) { showError('login-password', DH.i18n.t('err_required')); valid = false; }
     if (!valid) return;
 
-    const result = DH.data.users.authenticate(email, password);
+    const submitBtn = document.getElementById('btn-login');
+    if (submitBtn) submitBtn.disabled = true;
+    let result;
+    try {
+      result = await DH.data.users.authenticate(email, password);
+    } catch {
+      result = { error: 'err_generic' };
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+
     if (result.error) {
-      if (result.error === 'err_user_not_found' || result.error === 'err_account_suspended') {
-        showError('login-email', DH.i18n.t(result.error));
-      } else {
-        showError('login-password', DH.i18n.t(result.error));
-      }
+      if (result.error === 'err_account_suspended') showError('login-email', DH.i18n.t(result.error));
+      else showError('login-password', DH.i18n.t(result.error === 'err_generic' ? 'err_generic' : 'err_login_generic'));
       return;
     }
 
-    DH.data.session.set(result.user);
     toast(DH.i18n.t('toast_login_success'), 'success');
     const dest = result.user.role === 'admin' ? 'admin.html' : 'dashboard.html';
     setTimeout(() => { window.location.href = dest; }, 600);
@@ -171,7 +168,6 @@ DH.auth = (() => {
     hint.textContent = `${plan.name}: ${DH.currency.format(price, curSel.value)}${DH.i18n.t(PERIOD_KEYS[plan.period] || 'plan_period_monthly')}`;
   }
 
-  /* ── Country / state / document-type (CPF vs ID Number) ── */
   function populateCountrySelect() {
     const sel = document.getElementById('reg-country');
     if (!sel) return;
@@ -209,8 +205,6 @@ DH.auth = (() => {
     DH.i18n.applyTranslations();
   }
 
-  /* City suggestions only show once a Brazilian state has been picked (BR only —
-     other countries don't have a state list to scope by, so the field stays free). */
   function enableCityField(enabled) {
     const cityInput = document.getElementById('reg-city');
     if (!cityInput) return;
@@ -247,7 +241,6 @@ DH.auth = (() => {
     if (!form) return;
 
     form.addEventListener('submit', handleRegister);
-    form.addEventListener('keydown', e => { if (e.key === 'Enter') handleRegister(e); });
 
     populateCountrySelect();
     populateStateField();
@@ -268,24 +261,12 @@ DH.auth = (() => {
     if (planSel) planSel.addEventListener('change', updatePlanPriceHint);
     if (currencySel) currencySel.addEventListener('change', updatePlanPriceHint);
 
-    // Pre-select a plan when arriving from a pricing link (e.g. landing.html?plan=anual#register)
     const requestedPlan = new URLSearchParams(window.location.search).get('plan');
     if (requestedPlan && planSel) {
       const match = DH.data.plans.getAllActive().find(p => p.name.toLowerCase() === requestedPlan.toLowerCase());
       if (match) { planSel.value = match.id; updatePlanPriceHint(); }
     }
 
-    // Uppercase security code
-    const codeInput = document.getElementById('reg-security-code');
-    if (codeInput) {
-      codeInput.addEventListener('input', () => {
-        const pos = codeInput.selectionStart;
-        codeInput.value = codeInput.value.toUpperCase();
-        codeInput.setSelectionRange(pos, pos);
-      });
-    }
-
-    // Phone mask
     const phoneInput = document.getElementById('reg-phone');
     if (phoneInput) {
       phoneInput.addEventListener('input', () => {
@@ -296,7 +277,6 @@ DH.auth = (() => {
       });
     }
 
-    // CPF mask (Brazil only — other countries type a free-form ID Number)
     const cpfInput = document.getElementById('reg-cpf');
     if (cpfInput) {
       cpfInput.addEventListener('input', () => {
@@ -319,7 +299,7 @@ DH.auth = (() => {
     err_required_method: 'reg-payment-method',
   };
 
-  function handleRegister(e) {
+  async function handleRegister(e) {
     e.preventDefault();
     clearAllErrors();
     const name          = document.getElementById('reg-name').value.trim();
@@ -334,7 +314,6 @@ DH.auth = (() => {
     const email         = document.getElementById('reg-email').value.trim();
     const password      = document.getElementById('reg-password').value;
     const confirmPwd    = document.getElementById('reg-confirm-password').value;
-    const securityCode  = document.getElementById('reg-security-code').value.trim();
     const isBR          = country === 'BR';
 
     let valid = true;
@@ -351,22 +330,30 @@ DH.auth = (() => {
     if (!password)     { showError('reg-password', DH.i18n.t('err_required')); valid = false; }
     else if (password.length < 6) { showError('reg-password', DH.i18n.t('err_password_min')); valid = false; }
     if (password !== confirmPwd)  { showError('reg-confirm-password', DH.i18n.t('err_passwords_match')); valid = false; }
-    if (!securityCode) { showError('reg-security-code', DH.i18n.t('err_required')); valid = false; }
     if (!valid) return;
 
-    const result = DH.data.users.create({ name, email, password, securityCode, phone, cpf, country, city, state, planId, paymentMethod, currency });
+    const submitBtn = document.getElementById('btn-register');
+    if (submitBtn) submitBtn.disabled = true;
+    let result;
+    try {
+      result = await DH.data.users.create({ name, email, password, phone, cpf, country, city, state, planId, paymentMethod, currency });
+    } catch {
+      result = { error: 'err_generic' };
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+
     if (result.error) {
-      showError(REGISTER_ERROR_FIELD[result.error] || 'reg-email', DH.i18n.t(result.error));
+      showError(REGISTER_ERROR_FIELD[result.error] || 'reg-email', DH.i18n.t(result.error) || DH.i18n.t('err_generic'));
       return;
     }
 
-    DH.data.session.set(result.user);
     toast(DH.i18n.t('toast_register_success'), 'success');
     setTimeout(() => { window.location.href = 'dashboard.html'; }, 700);
   }
 
   /* ════════════════════════════════
-     FORGOT PASSWORD MODAL
+     FORGOT PASSWORD (e-mail link, via Supabase Auth)
   ════════════════════════════════ */
   function initForgotPassword() {
     const link    = document.getElementById('forgot-link');
@@ -383,19 +370,6 @@ DH.auth = (() => {
     });
 
     form.addEventListener('submit', handleForgotPassword);
-    form.addEventListener('keydown', e => { if (e.key === 'Enter') handleForgotPassword(e); });
-
-    updateStrengthBar('forgot-new-password', 'forgot-strength-bar', 'forgot-strength-text');
-
-    // Uppercase security code
-    const codeInput = document.getElementById('forgot-security-code');
-    if (codeInput) {
-      codeInput.addEventListener('input', () => {
-        const pos = codeInput.selectionStart;
-        codeInput.value = codeInput.value.toUpperCase();
-        codeInput.setSelectionRange(pos, pos);
-      });
-    }
   }
 
   function openForgotModal() {
@@ -407,47 +381,33 @@ DH.auth = (() => {
     if (overlay) { overlay.classList.remove('open'); clearAllErrors(); }
   }
 
-  function handleForgotPassword(e) {
+  async function handleForgotPassword(e) {
     e.preventDefault();
     clearAllErrors();
-    const email        = document.getElementById('forgot-email').value.trim();
-    const securityCode = document.getElementById('forgot-security-code').value.trim();
-    const newPassword  = document.getElementById('forgot-new-password').value;
+    const email = document.getElementById('forgot-email').value.trim();
 
     let valid = true;
-    if (!email)        { showError('forgot-email', DH.i18n.t('err_required')); valid = false; }
+    if (!email) { showError('forgot-email', DH.i18n.t('err_required')); valid = false; }
     else if (!validateEmail(email)) { showError('forgot-email', DH.i18n.t('err_email_invalid')); valid = false; }
-    if (!securityCode) { showError('forgot-security-code', DH.i18n.t('err_required')); valid = false; }
-    if (!newPassword)  { showError('forgot-new-password', DH.i18n.t('err_required')); valid = false; }
-    else if (newPassword.length < 6) { showError('forgot-new-password', DH.i18n.t('err_password_min')); valid = false; }
     if (!valid) return;
 
-    const result = DH.data.users.resetPassword(email, securityCode, newPassword);
-    if (result.error) {
-      if (result.error === 'err_user_not_found')   showError('forgot-email', DH.i18n.t(result.error));
-      if (result.error === 'err_security_code_wrong') showError('forgot-security-code', DH.i18n.t(result.error));
-      return;
-    }
-
-    toast(DH.i18n.t('toast_password_reset'), 'success');
+    await DH.data.users.sendPasswordReset(email);
+    toast(DH.i18n.t('toast_password_reset_sent'), 'success');
     closeForgotModal();
     document.getElementById('forgot-form').reset();
   }
 
   /* ════════════════════════════════
-     CHANGE PASSWORD (dashboard)
+     CHANGE PASSWORD (dashboard settings)
   ════════════════════════════════ */
   function initChangePassword() {
     const form = document.getElementById('change-password-form');
     if (!form) return;
-
     form.addEventListener('submit', handleChangePassword);
-    form.addEventListener('keydown', e => { if (e.key === 'Enter') handleChangePassword(e); });
-
     updateStrengthBar('change-new-password', 'change-strength-bar', 'change-strength-text');
   }
 
-  function handleChangePassword(e) {
+  async function handleChangePassword(e) {
     e.preventDefault();
     clearAllErrors();
     const current  = document.getElementById('change-current-password').value;
@@ -462,7 +422,7 @@ DH.auth = (() => {
     if (!valid) return;
 
     const userId = DH.state.currentUser?.id;
-    const result = DH.data.users.changePassword(userId, current, newPwd);
+    const result = await DH.data.users.changePassword(userId, current, newPwd);
     if (result.error) { showError('change-current-password', DH.i18n.t(result.error)); return; }
 
     DH.ui.showToast(DH.i18n.t('toast_password_changed'), 'success');
@@ -490,5 +450,13 @@ DH.auth = (() => {
     closeForgotModal,
     populatePlanSelect,
     populateCountrySelect,
+    checkPasswordStrength,
+    updateStrengthBar,
+    initPasswordToggles,
+    validateEmail,
+    showError,
+    clearError,
+    clearAllErrors,
+    toast,
   };
 })();

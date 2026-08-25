@@ -818,7 +818,7 @@ DH.dashboard = (() => {
     }
   }
 
-  function saveRegistrationData() {
+  async function saveRegistrationData() {
     const userId = DH.state.currentUser.id;
     const phone         = document.getElementById('settings-phone')?.value?.trim();
     const country       = document.getElementById('settings-country')?.value;
@@ -828,7 +828,7 @@ DH.dashboard = (() => {
     const currency       = document.getElementById('settings-currency')?.value;
     const paymentMethod  = document.getElementById('settings-payment-method')?.value;
 
-    DH.data.users.updateProfile(userId, { phone, country, city, state, planId, currency, paymentMethod });
+    await DH.data.users.updateProfile(userId, { phone, country, city, state, planId, currency, paymentMethod });
     DH.state.currentUser.country = country;
     DH.state.currentUser.city = city;
     DH.state.currentUser.state = state;
@@ -839,10 +839,10 @@ DH.dashboard = (() => {
     DH.ui.showToast(T('toast_registration_updated'), 'success');
   }
 
-  function saveProfileName() {
+  async function saveProfileName() {
     const name = document.getElementById('settings-name')?.value?.trim();
     if (!name) return;
-    DH.data.users.updateName(DH.state.currentUser.id, name);
+    await DH.data.users.updateName(DH.state.currentUser.id, name);
     DH.ui.showToast(T('toast_profile_updated'), 'success');
     // Update header avatar
     const avatarEl = document.getElementById('user-avatar-btn');

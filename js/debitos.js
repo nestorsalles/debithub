@@ -121,7 +121,7 @@ DH.debitos = (() => {
   }
 
   /* ── Save debit ── */
-  function saveDebit() {
+  async function saveDebit() {
     clearDebitErrors();
     const id          = document.getElementById('debit-id').value;
     const creditorId  = document.getElementById('debit-creditor').value;
@@ -146,10 +146,10 @@ DH.debitos = (() => {
     const userId = DH.state.currentUser.id;
 
     if (id) {
-      DH.data.debitos.update(id, { creditorId, description, date, amount, currency, category, type, installments });
+      await DH.data.debitos.update(id, { creditorId, description, date, amount, currency, category, type, installments });
       DH.ui.showToast(T('toast_debit_updated'), 'success');
     } else {
-      DH.data.debitos.create(userId, { creditorId, description, date, amount, currency, category, type, installments });
+      await DH.data.debitos.create(userId, { creditorId, description, date, amount, currency, category, type, installments });
       DH.ui.showToast(T('toast_debit_created'), 'success');
     }
 
@@ -160,8 +160,8 @@ DH.debitos = (() => {
 
   /* ── Delete debit ── */
   function deleteDebit(debitId) {
-    DH.ui.confirm(T('debit_delete_confirm'), () => {
-      DH.data.debitos.delete(debitId);
+    DH.ui.confirm(T('debit_delete_confirm'), async () => {
+      await DH.data.debitos.delete(debitId);
       DH.ui.showToast(T('toast_debit_deleted'), 'info');
       DH.dashboard.renderAll();
       if (DH.dashboard.selectedCreditorId) DH.dashboard.refreshDetail();
@@ -261,8 +261,8 @@ DH.debitos = (() => {
   }
 
   function deletePayment(paymentId) {
-    DH.ui.confirm(T('payment_delete_confirm'), () => {
-      DH.data.pagamentos.delete(paymentId);
+    DH.ui.confirm(T('payment_delete_confirm'), async () => {
+      await DH.data.pagamentos.delete(paymentId);
       DH.ui.showToast(T('toast_payment_deleted'), 'info');
       DH.dashboard.renderAll();
       if (DH.dashboard.selectedCreditorId) DH.dashboard.refreshDetail();
@@ -270,7 +270,7 @@ DH.debitos = (() => {
   }
 
   /* ── Save payment (create or update) ── */
-  function savePayment() {
+  async function savePayment() {
     clearPaymentErrors();
     const id         = document.getElementById('payment-id').value;
     const creditorId = document.getElementById('payment-creditor').value;
@@ -287,11 +287,11 @@ DH.debitos = (() => {
     if (!valid) return;
 
     if (id) {
-      DH.data.pagamentos.update(id, { amount, date, note });
+      await DH.data.pagamentos.update(id, { amount, date, note });
       DH.ui.showToast(T('toast_payment_updated'), 'success');
     } else {
       const userId = DH.state.currentUser.id;
-      DH.data.pagamentos.create(userId, { creditorId, debitId, amount, date, note });
+      await DH.data.pagamentos.create(userId, { creditorId, debitId, amount, date, note });
       DH.ui.showToast(T('toast_payment_created'), 'success');
     }
     DH.ui.closeModal('payment-modal-overlay');

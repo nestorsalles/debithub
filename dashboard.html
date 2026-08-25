@@ -340,6 +340,8 @@
 <!-- ═══════════════════════════════════════
      SCRIPTS
 ═══════════════════════════════════════ -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabase-client.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/date-field.js"></script>
 <script src="js/money-field.js"></script>
@@ -355,18 +357,24 @@
 // ── App Bootstrap ──
 window.DH = window.DH || {};
 DH.app = {
-  logout() {
-    DH.data.session.clear();
+  async logout() {
+    await DH.data.session.clear();
     window.location.href = 'index.html';
   }
 };
 
-(function() {
-  // Auth guard
-  const session = DH.data.session.get();
-  if (!session) { window.location.href = 'index.html'; return; }
-  if (session.role === 'admin') { window.location.href = 'admin.html'; return; }
-  DH.state.currentUser = session;
+(async function() {
+  // Auth guard — fetches the real session + this user's data from Supabase.
+  // Any unexpected failure here should never leave the page stuck on the
+  // loading spinner — fall back to the login page instead.
+  let profile;
+  try {
+    profile = await DH.data.bootstrap();
+  } catch {
+    window.location.href = 'index.html'; return;
+  }
+  if (!profile) { window.location.href = 'index.html'; return; }
+  if (profile.role === 'admin') { window.location.href = 'admin.html'; return; }
 
   // Load settings
   const s = DH.data.settings.get();

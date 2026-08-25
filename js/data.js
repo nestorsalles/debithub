@@ -1,5 +1,20 @@
 /* ============================================================
-   DebitHub — Data Layer (localStorage CRUD)
+   DebitHub — Data Layer (Supabase-backed, in-memory cache)
+   ------------------------------------------------------------
+   All accounts, debts and payments now live in a real shared
+   Postgres database (Supabase), not the browser's localStorage —
+   that's what makes the same login/data work from any device.
+
+   Design: on page load we fetch everything the current user is
+   allowed to see ONCE into `DH.cache` (a plain in-memory object).
+   Every *read* method below (getAll/getById/...) is still fully
+   SYNCHRONOUS, exactly like before — it just reads from `DH.cache`
+   instead of `localStorage`, so every existing render function
+   keeps working completely unchanged. Only *write* methods
+   (create/update/delete/setStatus/...) are `async`, since those
+   are the ones that actually need to talk to the network — and
+   each one patches `DH.cache` afterwards so the UI can just
+   re-render synchronously right after `await`ing the write.
    ============================================================ */
 
 window.DH = window.DH || {};
@@ -10,22 +25,19 @@ DH.state = {
   theme: 'dark',
 };
 
-DH.data = (() => {
-  const KEYS = {
-    users:      'dh_users',
-    credores:   'dh_credores',
-    debitos:    'dh_debitos',
-    pagamentos: 'dh_pagamentos',
-    billing:    'dh_billing',
-    plans:      'dh_plans',
-    session:    'dh_session',
-    settings:   'dh_settings',
-    language:   'dh_language',
-    theme:      'dh_theme',
-    currency:   'dh_currency',
-  };
+DH.cache = {
+  profile: null,
+  users: [],       // admin only: every non-admin profile
+  credores: [],
+  debitos: [],
+  pagamentos: [],
+  billing: [],      // admin only
+  plans: [],
+};
 
-  /* ── UUID generator ── */
+DH.data = (() => {
+  /* ── UUID generator (kept for anything that still wants a client id;
+     Postgres generates its own via gen_random_uuid() by default) ── */
   function uuid() {
     return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
       (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
@@ -36,7 +48,7 @@ DH.data = (() => {
   function toSlug(name) {
     return name
       .toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // remove accents
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
       .replace(/[^a-z0-9\s-]/g, '')
       .trim()
       .replace(/\s+/g, '-')
@@ -47,7 +59,7 @@ DH.data = (() => {
   function isValidCPF(raw) {
     const cpf = String(raw || '').replace(/\D/g, '');
     if (cpf.length !== 11) return false;
-    if (/^(\d)\1{10}$/.test(cpf)) return false; // all same digit
+    if (/^(\d)\1{10}$/.test(cpf)) return false;
     const calc = (len) => {
       let sum = 0;
       for (let i = 0; i < len; i++) sum += parseInt(cpf[i], 10) * (len + 1 - i);
@@ -61,15 +73,8 @@ DH.data = (() => {
     return cpf.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4').trim();
   }
 
-  /* ── Simple password encoding (NOT production-grade hashing) ── */
-  function encodePassword(pwd) {
-    return btoa(unescape(encodeURIComponent(pwd + ':dh_salt_2024')));
-  }
-  function verifyPassword(pwd, encoded) {
-    return encodePassword(pwd) === encoded;
-  }
-
-  /* ── Self-contained share-link encoding (URL-safe base64 of JSON) ── */
+  /* ── Self-contained share-link encoding (URL-safe base64 of JSON) ──
+     Unchanged: the public "d=" share link never touches Supabase. */
   const share = {
     encode(obj) {
       const json = JSON.stringify(obj);
@@ -86,226 +91,299 @@ DH.data = (() => {
     },
   };
 
-  /* ── Storage helpers ── */
-  function load(key) {
-    try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; }
+  /* ══════════════════════════════
+     Row <-> app-shape mappers
+     (DB columns are snake_case; the app's HTML/JS everywhere
+     else expects the same camelCase shape it always has)
+  ══════════════════════════════ */
+  function mapProfile(r) {
+    if (!r) return null;
+    return {
+      id: r.id, email: r.email, name: r.name || '', phone: r.phone || '', cpf: r.cpf || '',
+      country: r.country || 'BR', city: r.city || '', state: r.state || '',
+      planId: r.plan_id || '', paymentMethod: r.payment_method || '', currency: r.currency || 'BRL',
+      role: r.role, status: r.status, pendingSince: r.pending_since, createdAt: r.created_at,
+    };
   }
-  function loadOne(key) {
-    try { return JSON.parse(localStorage.getItem(key)) || null; } catch { return null; }
+  function mapCredor(r) {
+    return { id: r.id, userId: r.user_id, name: r.name, slug: r.slug, city: r.city || '', state: r.state || '', phone: r.phone || '', createdAt: r.created_at };
   }
-  function save(key, data) {
-    localStorage.setItem(key, JSON.stringify(data));
+  function mapDebito(r) {
+    return {
+      id: r.id, userId: r.user_id, creditorId: r.creditor_id, description: r.description, date: r.date,
+      amount: Number(r.amount), currency: r.currency || 'BRL', category: r.category || '',
+      type: r.type, installments: r.installments, installmentAmount: Number(r.installment_amount),
+      status: r.status, createdAt: r.created_at,
+    };
+  }
+  function mapPagamento(r) {
+    return { id: r.id, userId: r.user_id, creditorId: r.creditor_id, debitId: r.debit_id, amount: Number(r.amount), date: r.date, note: r.note || '', createdAt: r.created_at };
+  }
+  function mapBilling(r) {
+    return { id: r.id, userId: r.user_id, method: r.method, plan: r.plan || '', amount: Number(r.amount), date: r.date, note: r.note || '', createdAt: r.created_at };
+  }
+  function mapPlan(r) {
+    return { id: r.id, name: r.name, prices: r.prices || { BRL: 0, USD: 0, EUR: 0 }, period: r.period, active: r.active, order: r.order, createdAt: r.created_at };
+  }
+
+  function throwIfError(error) { if (error) throw error; }
+
+  /* ══════════════════════════════
+     BOOTSTRAP — fetch everything the
+     current user is allowed to see, once
+  ══════════════════════════════ */
+  async function bootstrap() {
+    const { data: { session } } = await DH.sb.auth.getSession();
+    if (!session) {
+      // Not logged in — plans are still needed for the public
+      // registration form's plan picker (RLS allows anon read).
+      const { data: plansRes } = await DH.sb.from('plans').select('*');
+      DH.cache.plans = (plansRes || []).map(mapPlan).sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+      return null;
+    }
+
+    const { data: profileRow, error: profileErr } = await DH.sb
+      .from('profiles').select('*').eq('id', session.user.id).single();
+    if (profileErr || !profileRow) return null;
+
+    let profile = mapProfile(profileRow);
+
+    // Lazy 24h pending -> suspended sweep for this user's own login.
+    if (profile.status === 'pending' && profile.pendingSince) {
+      const ageMs = Date.now() - new Date(profile.pendingSince).getTime();
+      if (ageMs > 24 * 60 * 60 * 1000) {
+        await DH.sb.from('profiles').update({ status: 'suspended' }).eq('id', profile.id);
+        profile.status = 'suspended';
+      }
+    }
+
+    DH.cache.profile = profile;
+
+    if (profile.role === 'admin') {
+      const [usersRes, credoresRes, debitosRes, pagamentosRes, billingRes, plansRes] = await Promise.all([
+        DH.sb.from('profiles').select('*').neq('role', 'admin'),
+        DH.sb.from('credores').select('*'),
+        DH.sb.from('debitos').select('*'),
+        DH.sb.from('pagamentos').select('*'),
+        DH.sb.from('billing').select('*'),
+        DH.sb.from('plans').select('*'),
+      ]);
+      DH.cache.users      = (usersRes.data || []).map(mapProfile);
+      DH.cache.credores   = (credoresRes.data || []).map(mapCredor);
+      DH.cache.debitos    = (debitosRes.data || []).map(mapDebito);
+      DH.cache.pagamentos = (pagamentosRes.data || []).map(mapPagamento);
+      DH.cache.billing    = (billingRes.data || []).map(mapBilling);
+      DH.cache.plans      = (plansRes.data || []).map(mapPlan).sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+
+      // Sweep every other pending account past the 24h grace window.
+      const now = Date.now();
+      const expiredIds = DH.cache.users
+        .filter(u => u.status === 'pending' && u.pendingSince && (now - new Date(u.pendingSince).getTime()) > 24 * 60 * 60 * 1000)
+        .map(u => u.id);
+      if (expiredIds.length) {
+        await DH.sb.from('profiles').update({ status: 'suspended' }).in('id', expiredIds);
+        DH.cache.users.forEach(u => { if (expiredIds.includes(u.id)) u.status = 'suspended'; });
+      }
+    } else {
+      const [credoresRes, debitosRes, pagamentosRes, plansRes] = await Promise.all([
+        DH.sb.from('credores').select('*').eq('user_id', profile.id),
+        DH.sb.from('debitos').select('*').eq('user_id', profile.id),
+        DH.sb.from('pagamentos').select('*').eq('user_id', profile.id),
+        DH.sb.from('plans').select('*'),
+      ]);
+      DH.cache.credores   = (credoresRes.data || []).map(mapCredor);
+      DH.cache.debitos    = (debitosRes.data || []).map(mapDebito);
+      DH.cache.pagamentos = (pagamentosRes.data || []).map(mapPagamento);
+      DH.cache.plans      = (plansRes.data || []).map(mapPlan).sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+    }
+
+    DH.state.currentUser = profile;
+    return profile;
   }
 
   /* ══════════════════════════════
      USERS
   ══════════════════════════════ */
   const users = {
-    getAll() { return load(KEYS.users); },
-    getById(id) { return this.getAll().find(u => u.id === id) || null; },
-    getByEmail(email) { return this.getAll().find(u => u.email.toLowerCase() === email.toLowerCase()) || null; },
+    getAll() { return DH.cache.users; },
+    getById(id) { return DH.cache.users.find(u => u.id === id) || (DH.cache.profile?.id === id ? DH.cache.profile : null); },
 
-    create({ name, email, password, securityCode, phone, cpf, country, city, state, planId, paymentMethod, currency, role }) {
-      const all = this.getAll();
-      if (this.getByEmail(email)) return { error: 'err_email_taken' };
+    async create({ name, email, password, phone, cpf, country, city, state, planId, paymentMethod, currency }) {
       const isBR = (country || 'BR') === 'BR';
-      if (role !== 'admin') {
-        if (!phone || !phone.trim()) return { error: 'err_required_phone' };
-        if (isBR) { if (!isValidCPF(cpf)) return { error: 'err_cpf_invalid' }; }
-        else { if (!cpf || !String(cpf).trim()) return { error: 'err_required_document' }; }
-        if (!city || !city.trim()) return { error: 'err_required_city' };
-        if (!state || !state.trim()) return { error: 'err_required_state' };
-        if (!planId) return { error: 'err_required_plan' };
-        if (!paymentMethod) return { error: 'err_required_method' };
-      }
-      const now = new Date().toISOString();
-      const user = {
-        id: uuid(),
-        name: name.trim(),
+      if (!phone || !phone.trim()) return { error: 'err_required_phone' };
+      if (isBR) { if (!isValidCPF(cpf)) return { error: 'err_cpf_invalid' }; }
+      else { if (!cpf || !String(cpf).trim()) return { error: 'err_required_document' }; }
+      if (!city || !city.trim()) return { error: 'err_required_city' };
+      if (!state || !state.trim()) return { error: 'err_required_state' };
+      if (!planId) return { error: 'err_required_plan' };
+      if (!paymentMethod) return { error: 'err_required_method' };
+
+      const { data: signUpData, error } = await DH.sb.auth.signUp({
         email: email.trim().toLowerCase(),
-        password: encodePassword(password),
-        securityCode: securityCode.trim().toUpperCase(),
-        phone: (phone || '').trim(),
-        cpf: cpf ? (isBR ? String(cpf).replace(/\D/g, '') : String(cpf).trim()) : '',
-        country: (country || 'BR').toUpperCase(),
-        city: (city || '').trim(),
-        state: isBR ? (state || '').trim().toUpperCase() : (state || '').trim(),
-        planId: planId || '',
-        paymentMethod: paymentMethod || '',
-        currency: currency || 'BRL',
-        role: role === 'admin' ? 'admin' : 'user',
-        // New accounts get immediate access ('pending'); if the admin hasn't
-        // confirmed payment and activated them within 24h, they auto-suspend
-        // (see syncExpiredPending) — their debt data is never deleted by this.
-        status: role === 'admin' ? 'active' : 'pending',
-        pendingSince: now,
-        createdAt: now,
-      };
-      all.push(user);
-      save(KEYS.users, all);
-      return { user };
-    },
-
-    /* Admin-only edit of a user's account/profile fields (never touches password/email/role). */
-    adminUpdate(userId, { name, phone, cpf, country, city, state, planId, paymentMethod, currency }) {
-      const all = this.getAll();
-      const idx = all.findIndex(u => u.id === userId);
-      if (idx < 0) return { error: 'err_user_not_found' };
-      const isBR = (country || all[idx].country || 'BR') === 'BR';
-      all[idx] = {
-        ...all[idx],
-        name: name != null ? name.trim() : all[idx].name,
-        phone: phone != null ? phone.trim() : all[idx].phone,
-        cpf: cpf != null ? (isBR ? String(cpf).replace(/\D/g, '') : String(cpf).trim()) : all[idx].cpf,
-        country: country != null ? country.toUpperCase() : (all[idx].country || 'BR'),
-        city: city != null ? city.trim() : all[idx].city,
-        state: state != null ? (isBR ? state.trim().toUpperCase() : state.trim()) : all[idx].state,
-        planId: planId != null ? planId : all[idx].planId,
-        paymentMethod: paymentMethod != null ? paymentMethod : all[idx].paymentMethod,
-        currency: currency != null ? currency : (all[idx].currency || 'BRL'),
-      };
-      save(KEYS.users, all);
-      return { user: all[idx] };
-    },
-
-    /* User-facing: the user editing their own registration data (never CPF/email/password). */
-    updateProfile(userId, fields) {
-      return this.adminUpdate(userId, fields);
-    },
-
-    /* Admin-only: permanently remove a user account and everything tied to it. */
-    delete(userId) {
-      const all = this.getAll().filter(u => u.id !== userId);
-      save(KEYS.users, all);
-      save(KEYS.credores, load(KEYS.credores).filter(c => c.userId !== userId));
-      save(KEYS.debitos, load(KEYS.debitos).filter(d => d.userId !== userId));
-      save(KEYS.pagamentos, load(KEYS.pagamentos).filter(p => p.userId !== userId));
-      save(KEYS.billing, load(KEYS.billing).filter(b => b.userId !== userId));
-      return { success: true };
-    },
-
-    /* Explicit admin action: activate / suspend / re-activate an account. */
-    setStatus(userId, status) {
-      const all = this.getAll();
-      const idx = all.findIndex(u => u.id === userId);
-      if (idx < 0) return { error: 'err_user_not_found' };
-      all[idx].status = status;
-      save(KEYS.users, all);
-      if (DH.state.currentUser && DH.state.currentUser.id === userId) {
-        DH.state.currentUser.status = status;
-        save(KEYS.session, DH.state.currentUser);
+        password,
+        options: {
+          data: {
+            name: name.trim(), phone: phone.trim(),
+            cpf: cpf ? (isBR ? String(cpf).replace(/\D/g, '') : String(cpf).trim()) : '',
+            country: (country || 'BR').toUpperCase(),
+            city: city.trim(), state: isBR ? state.trim().toUpperCase() : state.trim(),
+            plan_id: planId || '', payment_method: paymentMethod || '', currency: currency || 'BRL',
+          },
+        },
+      });
+      if (error) {
+        if (/registered|exists/i.test(error.message || '')) return { error: 'err_email_taken' };
+        return { error: 'err_generic', detail: error.message };
       }
-      return { user: all[idx] };
+      if (!signUpData.session) {
+        // Shouldn't happen with email-confirmation disabled, but guard anyway.
+        return { error: 'err_generic', detail: 'no_session_after_signup' };
+      }
+
+      // The on_auth_user_created trigger inserts the profile row; give it a beat.
+      let profileRow = null;
+      for (let i = 0; i < 6 && !profileRow; i++) {
+        const { data } = await DH.sb.from('profiles').select('*').eq('id', signUpData.user.id).maybeSingle();
+        if (data) { profileRow = data; break; }
+        await new Promise(r => setTimeout(r, 300));
+      }
+      if (!profileRow) return { error: 'err_generic', detail: 'profile_not_ready' };
+
+      return { user: mapProfile(profileRow) };
     },
 
-    /* Sweep: any 'pending' account past the 24h grace window auto-suspends
-       (access blocked) but nothing about their data is touched or removed.
-       Runs at admin panel load and right before a login check. */
-    syncExpiredPending() {
-      const all = this.getAll();
-      const now = Date.now();
-      let changed = false;
-      all.forEach(u => {
-        if (u.status === 'pending' && u.pendingSince) {
-          const ageMs = now - new Date(u.pendingSince).getTime();
-          if (ageMs > 24 * 60 * 60 * 1000) { u.status = 'suspended'; changed = true; }
+    async authenticate(email, password) {
+      const { data, error } = await DH.sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+      if (error) return { error: 'err_wrong_password' };
+
+      const { data: profileRow, error: profileErr } = await DH.sb.from('profiles').select('*').eq('id', data.user.id).single();
+      if (profileErr || !profileRow) return { error: 'err_generic' };
+      let profile = mapProfile(profileRow);
+
+      if (profile.status === 'pending' && profile.pendingSince) {
+        const ageMs = Date.now() - new Date(profile.pendingSince).getTime();
+        if (ageMs > 24 * 60 * 60 * 1000) {
+          await DH.sb.from('profiles').update({ status: 'suspended' }).eq('id', profile.id);
+          profile.status = 'suspended';
         }
-      });
-      if (changed) save(KEYS.users, all);
-    },
-
-    /* Ensure a default admin account exists (client-side only — see admin.html notes). */
-    seedAdmin() {
-      const all = this.getAll();
-      if (all.some(u => u.role === 'admin')) return;
-      all.push({
-        id: uuid(),
-        name: 'Administrador',
-        email: 'admin@debithub.local',
-        password: encodePassword('Admin@123'),
-        securityCode: 'ADMIN0001',
-        role: 'admin',
-        status: 'active',
-        createdAt: new Date().toISOString(),
-      });
-      save(KEYS.users, all);
-    },
-
-    /* Account list for the admin panel — never includes password or securityCode. */
-    listForAdmin() {
-      this.syncExpiredPending();
-      return this.getAll()
-        .filter(u => u.role !== 'admin')
-        .map(u => {
-          const credCount = load(KEYS.credores).filter(c => c.userId === u.id).length;
-          const debitCount = load(KEYS.debitos).filter(d => d.userId === u.id).length;
-          const paymentCount = load(KEYS.pagamentos).filter(p => p.userId === u.id).length;
-          const latestBill = billing.latestForUser(u.id);
-          const registeredPlan = u.planId ? plans.getById(u.planId) : null;
-          const isBR = (u.country || 'BR') === 'BR';
-          return {
-            id: u.id, name: u.name, email: u.email, createdAt: u.createdAt,
-            phone: u.phone || '', cpf: u.cpf ? (isBR ? formatCPF(u.cpf) : u.cpf) : '',
-            isBR,
-            country: u.country || 'BR',
-            city: u.city || '', state: u.state || '',
-            currency: u.currency || 'BRL',
-            status: u.status || 'active',
-            pendingSince: u.pendingSince || '',
-            registeredPlanId: u.planId || '',
-            registeredPlanName: registeredPlan ? registeredPlan.name : '',
-            registeredMethod: u.paymentMethod || '',
-            credCount, debitCount, paymentCount,
-            plan: latestBill ? latestBill.plan : '',
-            method: latestBill ? latestBill.method : '',
-            current: billing.isCurrent(u.id),
-            lastPaymentDate: latestBill ? latestBill.date : '',
-            lastPaymentAmount: latestBill ? latestBill.amount : 0,
-          };
-        });
-    },
-
-    authenticate(email, password) {
-      this.syncExpiredPending();
-      const user = this.getByEmail(email);
-      if (!user) return { error: 'err_user_not_found' };
-      if (!verifyPassword(password, user.password)) return { error: 'err_wrong_password' };
-      if (user.role !== 'admin' && user.status === 'suspended') return { error: 'err_account_suspended' };
-      return { user };
-    },
-
-    resetPassword(email, securityCode, newPassword) {
-      const all = this.getAll();
-      const idx = all.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-      if (idx < 0) return { error: 'err_user_not_found' };
-      if (all[idx].securityCode !== securityCode.trim().toUpperCase()) return { error: 'err_security_code_wrong' };
-      all[idx].password = encodePassword(newPassword);
-      save(KEYS.users, all);
-      return { success: true };
-    },
-
-    changePassword(userId, currentPassword, newPassword) {
-      const all = this.getAll();
-      const idx = all.findIndex(u => u.id === userId);
-      if (idx < 0) return { error: 'err_user_not_found' };
-      if (!verifyPassword(currentPassword, all[idx].password)) return { error: 'err_wrong_password' };
-      all[idx].password = encodePassword(newPassword);
-      save(KEYS.users, all);
-      return { success: true };
-    },
-
-    updateName(userId, name) {
-      const all = this.getAll();
-      const idx = all.findIndex(u => u.id === userId);
-      if (idx < 0) return { error: 'err_user_not_found' };
-      all[idx].name = name.trim();
-      save(KEYS.users, all);
-      // Update session
-      if (DH.state.currentUser && DH.state.currentUser.id === userId) {
-        DH.state.currentUser.name = name.trim();
-        save(KEYS.session, DH.state.currentUser);
       }
-      return { user: all[idx] };
+      if (profile.role !== 'admin' && profile.status === 'suspended') {
+        await DH.sb.auth.signOut();
+        return { error: 'err_account_suspended' };
+      }
+      return { user: profile };
+    },
+
+    /* Admin-only edit of a user's account/profile fields. */
+    async adminUpdate(userId, { name, phone, cpf, country, city, state, planId, paymentMethod, currency }) {
+      const isBR = (country || 'BR') === 'BR';
+      const patch = {
+        name: name != null ? name.trim() : undefined,
+        phone: phone != null ? phone.trim() : undefined,
+        cpf: cpf != null ? (isBR ? String(cpf).replace(/\D/g, '') : String(cpf).trim()) : undefined,
+        country: country != null ? country.toUpperCase() : undefined,
+        city: city != null ? city.trim() : undefined,
+        state: state != null ? (isBR ? state.trim().toUpperCase() : state.trim()) : undefined,
+        plan_id: planId != null ? (planId || null) : undefined,
+        payment_method: paymentMethod != null ? paymentMethod : undefined,
+        currency: currency != null ? currency : undefined,
+      };
+      Object.keys(patch).forEach(k => patch[k] === undefined && delete patch[k]);
+
+      const { data, error } = await DH.sb.from('profiles').update(patch).eq('id', userId).select('*').single();
+      if (error) return { error: 'err_generic', detail: error.message };
+      const updated = mapProfile(data);
+      const idx = DH.cache.users.findIndex(u => u.id === userId);
+      if (idx >= 0) DH.cache.users[idx] = updated;
+      if (DH.state.currentUser?.id === userId) DH.state.currentUser = updated;
+      return { user: updated };
+    },
+
+    async updateProfile(userId, fields) { return this.adminUpdate(userId, fields); },
+
+    async delete(userId) {
+      const { data: { session } } = await DH.sb.auth.getSession();
+      const res = await fetch(DH.functionsUrl('delete-user'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ userId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: body.error || 'err_generic' };
+      DH.cache.users = DH.cache.users.filter(u => u.id !== userId);
+      DH.cache.credores = DH.cache.credores.filter(c => c.userId !== userId);
+      DH.cache.debitos = DH.cache.debitos.filter(d => d.userId !== userId);
+      DH.cache.pagamentos = DH.cache.pagamentos.filter(p => p.userId !== userId);
+      DH.cache.billing = DH.cache.billing.filter(b => b.userId !== userId);
+      return { success: true };
+    },
+
+    async setStatus(userId, status) {
+      const { data, error } = await DH.sb.from('profiles').update({ status }).eq('id', userId).select('*').single();
+      if (error) return { error: 'err_generic', detail: error.message };
+      const updated = mapProfile(data);
+      const idx = DH.cache.users.findIndex(u => u.id === userId);
+      if (idx >= 0) DH.cache.users[idx] = updated;
+      if (DH.state.currentUser?.id === userId) { DH.state.currentUser.status = status; }
+      return { user: updated };
+    },
+
+    /* Account list for the admin panel — never includes password.
+       Fully synchronous: everything it needs is already in DH.cache
+       from bootstrap(), so this reproduces the old join-in-memory
+       logic without a single network round trip per row. */
+    listForAdmin() {
+      return this.getAll().map(u => {
+        const credCount    = DH.cache.credores.filter(c => c.userId === u.id).length;
+        const debitCount   = DH.cache.debitos.filter(d => d.userId === u.id).length;
+        const paymentCount = DH.cache.pagamentos.filter(p => p.userId === u.id).length;
+        const latestBill   = billing.latestForUser(u.id);
+        const registeredPlan = u.planId ? plans.getById(u.planId) : null;
+        const isBR = (u.country || 'BR') === 'BR';
+        return {
+          id: u.id, name: u.name, email: u.email, createdAt: u.createdAt,
+          phone: u.phone || '', cpf: u.cpf ? (isBR ? formatCPF(u.cpf) : u.cpf) : '',
+          isBR,
+          country: u.country || 'BR',
+          city: u.city || '', state: u.state || '',
+          currency: u.currency || 'BRL',
+          status: u.status || 'active',
+          pendingSince: u.pendingSince || '',
+          registeredPlanId: u.planId || '',
+          registeredPlanName: registeredPlan ? registeredPlan.name : '',
+          registeredMethod: u.paymentMethod || '',
+          credCount, debitCount, paymentCount,
+          plan: latestBill ? latestBill.plan : '',
+          method: latestBill ? latestBill.method : '',
+          current: billing.isCurrent(u.id),
+          lastPaymentDate: latestBill ? latestBill.date : '',
+          lastPaymentAmount: latestBill ? latestBill.amount : 0,
+        };
+      });
+    },
+
+    async sendPasswordReset(email) {
+      const redirectTo = window.location.origin + window.location.pathname.replace(/[^/]*$/, 'reset-password.html');
+      await DH.sb.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
+      // Always resolve success — never reveal whether the e-mail exists.
+      return { success: true };
+    },
+
+    async changePassword(userId, currentPassword, newPassword) {
+      const email = DH.state.currentUser?.email;
+      const { error: verifyErr } = await DH.sb.auth.signInWithPassword({ email, password: currentPassword });
+      if (verifyErr) return { error: 'err_wrong_password' };
+      const { error } = await DH.sb.auth.updateUser({ password: newPassword });
+      if (error) return { error: 'err_generic', detail: error.message };
+      return { success: true };
+    },
+
+    async updateName(userId, name) {
+      const { data, error } = await DH.sb.from('profiles').update({ name: name.trim() }).eq('id', userId).select('*').single();
+      if (error) return { error: 'err_generic', detail: error.message };
+      const updated = mapProfile(data);
+      if (DH.state.currentUser?.id === userId) DH.state.currentUser.name = updated.name;
+      return { user: updated };
     },
   };
 
@@ -313,76 +391,69 @@ DH.data = (() => {
      SESSION
   ══════════════════════════════ */
   const session = {
-    get() { return loadOne(KEYS.session); },
-    set(user) { save(KEYS.session, user); DH.state.currentUser = user; },
-    clear() { localStorage.removeItem(KEYS.session); DH.state.currentUser = null; },
+    get() { return DH.state.currentUser; },
+    async clear() { await DH.sb.auth.signOut(); DH.state.currentUser = null; },
   };
 
   /* ══════════════════════════════
      CREDORES
   ══════════════════════════════ */
   const credores = {
-    getAll(userId) {
-      return load(KEYS.credores).filter(c => c.userId === userId);
-    },
-    getAllPublic() {
-      return load(KEYS.credores);
-    },
-    getById(id) {
-      return load(KEYS.credores).find(c => c.id === id) || null;
-    },
-    getBySlug(slug) {
-      return load(KEYS.credores).find(c => c.slug === slug) || null;
-    },
+    getAll(userId) { return DH.cache.credores.filter(c => c.userId === userId); },
+    getAllPublic() { return DH.cache.credores; },
+    getById(id) { return DH.cache.credores.find(c => c.id === id) || null; },
+    getBySlug(slug) { return DH.cache.credores.find(c => c.slug === slug) || null; },
 
-    create(userId, { name, city, state, phone }) {
-      const all = load(KEYS.credores);
+    async create(userId, { name, city, state, phone }) {
       const baseSlug = toSlug(name);
-      // Ensure unique slug
-      let slug = baseSlug;
-      let count = 1;
-      while (all.some(c => c.slug === slug)) { slug = baseSlug + '-' + count++; }
+      let slug = baseSlug, count = 1;
+      const mine = () => DH.cache.credores.filter(c => c.userId === userId);
+      while (mine().some(c => c.slug === slug)) { slug = baseSlug + '-' + count++; }
 
-      const credor = {
-        id: uuid(), userId,
-        name: name.trim(), slug, city: city.trim(), state: state.trim().toUpperCase(), phone: phone.trim(),
-        createdAt: new Date().toISOString(),
-      };
-      all.push(credor);
-      save(KEYS.credores, all);
+      const { data, error } = await DH.sb.from('credores').insert({
+        user_id: userId, name: name.trim(), slug, city: city.trim(), state: state.trim().toUpperCase(), phone: phone.trim(),
+      }).select('*').single();
+      throwIfError(error);
+      const credor = mapCredor(data);
+      DH.cache.credores.push(credor);
       return credor;
     },
 
-    update(id, { name, city, state, phone }) {
-      const all = load(KEYS.credores);
-      const idx = all.findIndex(c => c.id === id);
-      if (idx < 0) return null;
+    async update(id, { name, city, state, phone }) {
+      const existing = this.getById(id);
+      if (!existing) return null;
       const baseSlug = toSlug(name);
-      let slug = baseSlug;
-      let count = 1;
-      while (all.some(c => c.slug === slug && c.id !== id)) { slug = baseSlug + '-' + count++; }
-      all[idx] = { ...all[idx], name: name.trim(), slug, city: city.trim(), state: state.trim().toUpperCase(), phone: phone.trim() };
-      save(KEYS.credores, all);
-      return all[idx];
+      let slug = baseSlug, count = 1;
+      const mine = () => DH.cache.credores.filter(c => c.userId === existing.userId && c.id !== id);
+      while (mine().some(c => c.slug === slug)) { slug = baseSlug + '-' + count++; }
+
+      const { data, error } = await DH.sb.from('credores').update({
+        name: name.trim(), slug, city: city.trim(), state: state.trim().toUpperCase(), phone: phone.trim(),
+      }).eq('id', id).select('*').single();
+      throwIfError(error);
+      const updated = mapCredor(data);
+      const idx = DH.cache.credores.findIndex(c => c.id === id);
+      if (idx >= 0) DH.cache.credores[idx] = updated;
+      return updated;
     },
 
-    delete(id) {
-      const allC = load(KEYS.credores).filter(c => c.id !== id);
-      const allD = load(KEYS.debitos).filter(d => d.creditorId !== id);
-      const allP = load(KEYS.pagamentos).filter(p => p.creditorId !== id);
-      save(KEYS.credores, allC);
-      save(KEYS.debitos, allD);
-      save(KEYS.pagamentos, allP);
+    async delete(id) {
+      const { error } = await DH.sb.from('credores').delete().eq('id', id);
+      throwIfError(error);
+      DH.cache.credores = DH.cache.credores.filter(c => c.id !== id);
+      DH.cache.debitos = DH.cache.debitos.filter(d => d.creditorId !== id);
+      DH.cache.pagamentos = DH.cache.pagamentos.filter(p => p.creditorId !== id);
     },
 
-    /* Self-contained snapshot for the public share link (works for anyone, any device) */
+    /* Self-contained snapshot for the public share link — unchanged,
+       reads only from the already-populated cache. */
     snapshotFor(creditorId) {
       const credor = this.getById(creditorId);
       if (!credor) return null;
       const debtor = users.getById(credor.userId);
-      const allDebits = load(KEYS.debitos).filter(d => d.creditorId === creditorId);
+      const allDebits = DH.cache.debitos.filter(d => d.creditorId === creditorId);
       const debitIds = new Set(allDebits.map(d => d.id));
-      const allPayments = load(KEYS.pagamentos).filter(p => debitIds.has(p.debitId));
+      const allPayments = DH.cache.pagamentos.filter(p => debitIds.has(p.debitId));
       return {
         v: 1,
         credor: { name: credor.name, city: credor.city, state: credor.state, phone: credor.phone },
@@ -409,87 +480,73 @@ DH.data = (() => {
      DEBITOS
   ══════════════════════════════ */
   const debitos = {
-    getAll(userId) {
-      return load(KEYS.debitos).filter(d => d.userId === userId);
-    },
-    getAllPublic() { return load(KEYS.debitos); },
-    getById(id) { return load(KEYS.debitos).find(d => d.id === id) || null; },
+    getAll(userId) { return DH.cache.debitos.filter(d => d.userId === userId); },
+    getAllPublic() { return DH.cache.debitos; },
+    getById(id) { return DH.cache.debitos.find(d => d.id === id) || null; },
     getByCreditor(creditorId, userId) {
-      return load(KEYS.debitos).filter(d => d.creditorId === creditorId && (userId ? d.userId === userId : true));
+      return DH.cache.debitos.filter(d => d.creditorId === creditorId && (userId ? d.userId === userId : true));
     },
 
-    create(userId, { creditorId, description, date, amount, type, installments, currency, category }) {
-      const all = load(KEYS.debitos);
+    async create(userId, { creditorId, description, date, amount, type, installments, currency, category }) {
       amount = parseFloat(amount);
       installments = parseInt(installments) || 1;
       const installmentAmount = type === 'installment' ? +(amount / installments).toFixed(2) : amount;
 
-      const debit = {
-        id: uuid(), userId, creditorId,
-        description: description.trim(),
-        date,
-        amount,
-        currency: currency || 'BRL',
-        category: category || '',
-        type, // 'unique' | 'installment' | 'recurring'
+      const { data, error } = await DH.sb.from('debitos').insert({
+        user_id: userId, creditor_id: creditorId, description: description.trim(), date, amount,
+        currency: currency || 'BRL', category: category || '', type,
         installments: type === 'installment' ? installments : (type === 'recurring' ? 0 : 1),
-        installmentAmount,
-        status: 'active',
-        createdAt: new Date().toISOString(),
-      };
-      all.push(debit);
-      save(KEYS.debitos, all);
+        installment_amount: installmentAmount, status: 'active',
+      }).select('*').single();
+      throwIfError(error);
+      const debit = mapDebito(data);
+      DH.cache.debitos.push(debit);
       return debit;
     },
 
-    update(id, fields) {
-      const all = load(KEYS.debitos);
-      const idx = all.findIndex(d => d.id === id);
-      if (idx < 0) return null;
+    async update(id, fields) {
       const amount = parseFloat(fields.amount);
       const installments = parseInt(fields.installments) || 1;
       const installmentAmount = fields.type === 'installment' ? +(amount / installments).toFixed(2) : amount;
-      all[idx] = {
-        ...all[idx],
-        description: fields.description.trim(),
-        date: fields.date,
-        amount,
-        currency: fields.currency || 'BRL',
-        category: fields.category || '',
-        type: fields.type,
+
+      const { data, error } = await DH.sb.from('debitos').update({
+        description: fields.description.trim(), date: fields.date, amount,
+        currency: fields.currency || 'BRL', category: fields.category || '', type: fields.type,
         installments: fields.type === 'installment' ? installments : (fields.type === 'recurring' ? 0 : 1),
-        installmentAmount,
-      };
-      // Recompute status
-      all[idx].status = debitos._computeStatus(all[idx]);
-      save(KEYS.debitos, all);
-      return all[idx];
+        installment_amount: installmentAmount,
+      }).eq('id', id).select('*').single();
+      throwIfError(error);
+      let updated = mapDebito(data);
+      updated.status = debitos._computeStatus(updated);
+      const idx = DH.cache.debitos.findIndex(d => d.id === id);
+      if (idx >= 0) DH.cache.debitos[idx] = updated;
+      await this.updateStatus(id);
+      return updated;
     },
 
-    delete(id) {
-      const allD = load(KEYS.debitos).filter(d => d.id !== id);
-      const allP = load(KEYS.pagamentos).filter(p => p.debitId !== id);
-      save(KEYS.debitos, allD);
-      save(KEYS.pagamentos, allP);
+    async delete(id) {
+      const { error } = await DH.sb.from('debitos').delete().eq('id', id);
+      throwIfError(error);
+      DH.cache.debitos = DH.cache.debitos.filter(d => d.id !== id);
+      DH.cache.pagamentos = DH.cache.pagamentos.filter(p => p.debitId !== id);
     },
 
-    // Recalculate status based on payments
-    updateStatus(debitId) {
-      const all = load(KEYS.debitos);
-      const idx = all.findIndex(d => d.id === debitId);
-      if (idx < 0) return;
-      const debit = all[idx];
-      const payments = load(KEYS.pagamentos).filter(p => p.debitId === debitId);
-      const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
-      if (totalPaid <= 0) { all[idx].status = 'active'; }
-      else if (totalPaid >= debit.amount) { all[idx].status = 'paid'; }
-      else { all[idx].status = 'partial'; }
-      save(KEYS.debitos, all);
-      return all[idx];
+    /* Recalculate + persist status based on cached payments. */
+    async updateStatus(debitId) {
+      const debit = this.getById(debitId);
+      if (!debit) return;
+      const newStatus = this._computeStatus(debit);
+      if (newStatus === debit.status) return debit;
+      const { data, error } = await DH.sb.from('debitos').update({ status: newStatus }).eq('id', debitId).select('*').single();
+      if (error) return debit;
+      const updated = mapDebito(data);
+      const idx = DH.cache.debitos.findIndex(d => d.id === debitId);
+      if (idx >= 0) DH.cache.debitos[idx] = updated;
+      return updated;
     },
 
     _computeStatus(debit) {
-      const payments = load(KEYS.pagamentos).filter(p => p.debitId === debit.id);
+      const payments = DH.cache.pagamentos.filter(p => p.debitId === debit.id);
       const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
       if (totalPaid <= 0) return 'active';
       if (totalPaid >= debit.amount) return 'paid';
@@ -501,67 +558,52 @@ DH.data = (() => {
      PAGAMENTOS
   ══════════════════════════════ */
   const pagamentos = {
-    getAll(userId) {
-      return load(KEYS.pagamentos).filter(p => p.userId === userId);
-    },
-    getAllPublic() { return load(KEYS.pagamentos); },
-    getByCreditor(creditorId) {
-      return load(KEYS.pagamentos).filter(p => p.creditorId === creditorId);
-    },
-    getByDebit(debitId) {
-      return load(KEYS.pagamentos).filter(p => p.debitId === debitId);
-    },
+    getAll(userId) { return DH.cache.pagamentos.filter(p => p.userId === userId); },
+    getAllPublic() { return DH.cache.pagamentos; },
+    getByCreditor(creditorId) { return DH.cache.pagamentos.filter(p => p.creditorId === creditorId); },
+    getByDebit(debitId) { return DH.cache.pagamentos.filter(p => p.debitId === debitId); },
 
-    create(userId, { creditorId, debitId, amount, date, note }) {
-      const all = load(KEYS.pagamentos);
+    async create(userId, { creditorId, debitId, amount, date, note }) {
       amount = parseFloat(amount);
-      const pag = {
-        id: uuid(), userId, creditorId, debitId,
-        amount, date,
-        note: (note || '').trim(),
-        createdAt: new Date().toISOString(),
-      };
-      all.push(pag);
-      save(KEYS.pagamentos, all);
-      // Update debit status
-      debitos.updateStatus(debitId);
+      const { data, error } = await DH.sb.from('pagamentos').insert({
+        user_id: userId, creditor_id: creditorId, debit_id: debitId, amount, date, note: (note || '').trim(),
+      }).select('*').single();
+      throwIfError(error);
+      const pag = mapPagamento(data);
+      DH.cache.pagamentos.push(pag);
+      await debitos.updateStatus(debitId);
       return pag;
     },
 
-    update(id, { amount, date, note }) {
-      const all = load(KEYS.pagamentos);
-      const idx = all.findIndex(p => p.id === id);
-      if (idx < 0) return null;
-      all[idx] = { ...all[idx], amount: parseFloat(amount), date, note: (note || '').trim() };
-      save(KEYS.pagamentos, all);
-      debitos.updateStatus(all[idx].debitId);
-      return all[idx];
+    async update(id, { amount, date, note }) {
+      const existing = DH.cache.pagamentos.find(p => p.id === id);
+      const { data, error } = await DH.sb.from('pagamentos').update({
+        amount: parseFloat(amount), date, note: (note || '').trim(),
+      }).eq('id', id).select('*').single();
+      throwIfError(error);
+      const updated = mapPagamento(data);
+      const idx = DH.cache.pagamentos.findIndex(p => p.id === id);
+      if (idx >= 0) DH.cache.pagamentos[idx] = updated;
+      if (existing) await debitos.updateStatus(existing.debitId);
+      return updated;
     },
 
-    delete(id) {
-      const all = load(KEYS.pagamentos);
-      const pag = all.find(p => p.id === id);
-      const filtered = all.filter(p => p.id !== id);
-      save(KEYS.pagamentos, filtered);
-      if (pag) debitos.updateStatus(pag.debitId);
+    async delete(id) {
+      const pag = DH.cache.pagamentos.find(p => p.id === id);
+      const { error } = await DH.sb.from('pagamentos').delete().eq('id', id);
+      throwIfError(error);
+      DH.cache.pagamentos = DH.cache.pagamentos.filter(p => p.id !== id);
+      if (pag) await debitos.updateStatus(pag.debitId);
     },
 
-    /* Total paid for a specific debit */
     totalPaidForDebit(debitId) {
-      return load(KEYS.pagamentos)
-        .filter(p => p.debitId === debitId)
-        .reduce((s, p) => s + p.amount, 0);
+      return DH.cache.pagamentos.filter(p => p.debitId === debitId).reduce((s, p) => s + p.amount, 0);
     },
-
-    /* Total paid for a creditor */
     totalPaidForCreditor(creditorId) {
-      return load(KEYS.pagamentos)
-        .filter(p => p.creditorId === creditorId)
-        .reduce((s, p) => s + p.amount, 0);
+      return DH.cache.pagamentos.filter(p => p.creditorId === creditorId).reduce((s, p) => s + p.amount, 0);
     },
   };
 
-  /* Canonical plan display order — Teste, Mensal, Trimestral, Semestral, Anual, then anything custom last. */
   const PLAN_SORT_ORDER = { teste: 0, mensal: 1, trimestral: 2, semestral: 3, anual: 4 };
   function planSortKey(p) {
     if (typeof p.order === 'number') return p.order;
@@ -569,27 +611,20 @@ DH.data = (() => {
     return key !== undefined ? key : 99;
   }
 
-  /* If every debit shares one currency, use it for aggregate display; otherwise fall back to BRL. */
   function dominantCurrency(debits) {
     const codes = [...new Set(debits.map(d => d.currency || 'BRL'))];
     return codes.length === 1 ? codes[0] : 'BRL';
   }
 
-  /* Parse a 'YYYY-MM-DD' date string as local midnight (not UTC), so range
-     comparisons don't shift a day off near timezone boundaries. */
   function localDate(dateStr) {
     return new Date(dateStr + (String(dateStr).includes('T') ? '' : 'T00:00:00'));
   }
 
   /* ══════════════════════════════
      PLATFORM BILLING (admin-only)
-     Subscription payments users make TO the platform owner —
-     entered manually by the admin. Separate from `pagamentos`,
-     which are debt payments between the app's own users and
-     the people they owe.
   ══════════════════════════════ */
   const billing = {
-    getAll() { return load(KEYS.billing); },
+    getAll() { return DH.cache.billing; },
     getByUser(userId) { return this.getAll().filter(b => b.userId === userId); },
 
     latestForUser(userId) {
@@ -597,7 +632,6 @@ DH.data = (() => {
       return list[0] || null;
     },
 
-    /* "Em dia" if there's a payment within the last 30 days; otherwise "inadimplente". */
     isCurrent(userId) {
       const latest = this.latestForUser(userId);
       if (!latest) return false;
@@ -605,142 +639,102 @@ DH.data = (() => {
       return days <= 30;
     },
 
-    create({ userId, method, plan, amount, date, note }) {
-      const all = this.getAll();
-      const record = {
-        id: uuid(), userId,
-        method, // 'pix' | 'card' | 'boleto' | 'bonus'
-        plan: (plan || '').trim(),
-        amount: parseFloat(amount) || 0,
-        date,
-        note: (note || '').trim(),
-        createdAt: new Date().toISOString(),
-      };
-      all.push(record);
-      save(KEYS.billing, all);
+    async create({ userId, method, plan, amount, date, note }) {
+      const { data, error } = await DH.sb.from('billing').insert({
+        user_id: userId, method, plan: (plan || '').trim(), amount: parseFloat(amount) || 0, date, note: (note || '').trim(),
+      }).select('*').single();
+      throwIfError(error);
+      const record = mapBilling(data);
+      DH.cache.billing.push(record);
       return record;
     },
 
-    update(id, { method, plan, amount, date, note }) {
-      const all = this.getAll();
-      const idx = all.findIndex(b => b.id === id);
-      if (idx < 0) return null;
-      all[idx] = {
-        ...all[idx],
+    async update(id, { method, plan, amount, date, note }) {
+      const { data, error } = await DH.sb.from('billing').update({
         method, plan: (plan || '').trim(), amount: parseFloat(amount) || 0, date, note: (note || '').trim(),
-      };
-      save(KEYS.billing, all);
-      return all[idx];
+      }).eq('id', id).select('*').single();
+      throwIfError(error);
+      const updated = mapBilling(data);
+      const idx = DH.cache.billing.findIndex(b => b.id === id);
+      if (idx >= 0) DH.cache.billing[idx] = updated;
+      return updated;
     },
 
-    delete(id) {
-      save(KEYS.billing, this.getAll().filter(b => b.id !== id));
+    async delete(id) {
+      const { error } = await DH.sb.from('billing').delete().eq('id', id);
+      throwIfError(error);
+      DH.cache.billing = DH.cache.billing.filter(b => b.id !== id);
     },
 
-    /* Revenue summary within an optional [from, to] range (Date objects, or null for open-ended). */
     summary(from, to) {
       const inRange = (dateStr) => {
         if (!from && !to) return true;
         const dt = localDate(dateStr);
         if (from && dt < from) return false;
-        if (to   && dt > to)   return false;
+        if (to && dt > to) return false;
         return true;
       };
       const filtered = this.getAll().filter(b => inRange(b.date));
-      return {
-        revenue: filtered.reduce((s, b) => s + b.amount, 0),
-        paymentCount: filtered.length,
-      };
+      return { revenue: filtered.reduce((s, b) => s + b.amount, 0), paymentCount: filtered.length };
     },
   };
 
   /* ══════════════════════════════
      PLANS (admin-managed subscription plans)
-     Shown as choices on the registration form; whatever the
-     admin edits here is what new signups see.
   ══════════════════════════════ */
   const plans = {
-    getAll() {
-      // Transparently upgrade legacy single-`price` plans to the multi-currency shape.
-      const all = load(KEYS.plans).map(p => p.prices ? p : { ...p, prices: { BRL: p.price || 0, USD: 0, EUR: 0 } });
-      return all.sort((a, b) => planSortKey(a) - planSortKey(b));
-    },
+    getAll() { return DH.cache.plans.slice().sort((a, b) => planSortKey(a) - planSortKey(b)); },
     getAllActive() { return this.getAll().filter(p => p.active !== false); },
-    getById(id) { return this.getAll().find(p => p.id === id) || null; },
+    getById(id) { return DH.cache.plans.find(p => p.id === id) || null; },
 
-    /* Price of a plan in a given currency; falls back to BRL if that currency wasn't set. */
     priceFor(plan, currency) {
       if (!plan || !plan.prices) return 0;
       const code = currency || 'BRL';
       return plan.prices[code] || plan.prices.BRL || 0;
     },
 
-    create({ name, prices, period }) {
-      const all = load(KEYS.plans);
-      const plan = {
-        id: uuid(),
+    async create({ name, prices, period }) {
+      const payload = {
         name: (name || '').trim(),
         prices: { BRL: parseFloat(prices?.BRL) || 0, USD: parseFloat(prices?.USD) || 0, EUR: parseFloat(prices?.EUR) || 0 },
-        period: period || 'monthly', // 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'unlimited'
-        active: true,
-        createdAt: new Date().toISOString(),
+        period: period || 'monthly', active: true,
       };
-      all.push(plan);
-      save(KEYS.plans, all);
+      const { data, error } = await DH.sb.from('plans').insert(payload).select('*').single();
+      throwIfError(error);
+      const plan = mapPlan(data);
+      DH.cache.plans.push(plan);
       return plan;
     },
 
-    update(id, { name, prices, period }) {
-      const all = this.getAll();
-      const idx = all.findIndex(p => p.id === id);
-      if (idx < 0) return null;
-      all[idx] = {
-        ...all[idx],
+    async update(id, { name, prices, period }) {
+      const payload = {
         name: (name || '').trim(),
         prices: { BRL: parseFloat(prices?.BRL) || 0, USD: parseFloat(prices?.USD) || 0, EUR: parseFloat(prices?.EUR) || 0 },
-        period: period || all[idx].period,
+        period: period || undefined,
       };
-      save(KEYS.plans, all);
-      return all[idx];
+      Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+      const { data, error } = await DH.sb.from('plans').update(payload).eq('id', id).select('*').single();
+      throwIfError(error);
+      const updated = mapPlan(data);
+      const idx = DH.cache.plans.findIndex(p => p.id === id);
+      if (idx >= 0) DH.cache.plans[idx] = updated;
+      return updated;
     },
 
-    /* Hard-delete only if no account references this plan; otherwise the caller should deactivate it instead. */
-    delete(id) {
-      const inUse = load(KEYS.users).some(u => u.planId === id);
+    async delete(id) {
+      const inUse = DH.cache.users.some(u => u.planId === id);
       if (inUse) return { error: 'err_plan_in_use' };
-      save(KEYS.plans, this.getAll().filter(p => p.id !== id));
+      const { error } = await DH.sb.from('plans').delete().eq('id', id);
+      throwIfError(error);
+      DH.cache.plans = DH.cache.plans.filter(p => p.id !== id);
       return { success: true };
-    },
-
-    /* Seed sensible defaults on first run — matches the pricing advertised on the landing page. */
-    seedDefaults() {
-      if (this.getAll().length > 0) return;
-      this.create({ name: 'Teste',      prices: { BRL: 0,   USD: 0,  EUR: 0  }, period: 'unlimited' });
-      this.create({ name: 'Mensal',     prices: { BRL: 29,  USD: 5.9, EUR: 5.5 }, period: 'monthly' });
-      this.create({ name: 'Trimestral', prices: { BRL: 81,  USD: 16, EUR: 15 }, period: 'quarterly' });
-      this.create({ name: 'Semestral',  prices: { BRL: 157, USD: 31, EUR: 29 }, period: 'semiannual' });
-      this.create({ name: 'Anual',      prices: { BRL: 299, USD: 59, EUR: 55 }, period: 'annual' });
-    },
-
-    /* Keeps installs created before Teste/Trimestral existed in sync with the current
-       catalog, without touching any custom plans the admin already added themselves. */
-    reconcileDefaults() {
-      const all = this.getAll();
-      const find = n => all.find(p => p.name.trim().toLowerCase() === n);
-      if (!find('teste'))      this.create({ name: 'Teste', prices: { BRL: 0, USD: 0, EUR: 0 }, period: 'unlimited' });
-      if (!find('trimestral')) this.create({ name: 'Trimestral', prices: { BRL: 81, USD: 16, EUR: 15 }, period: 'quarterly' });
-      const mensal = find('mensal');
-      if (mensal && mensal.prices.BRL !== 29) {
-        this.update(mensal.id, { name: mensal.name, prices: { ...mensal.prices, BRL: 29 }, period: mensal.period });
-      }
     },
   };
 
   /* ══════════════════════════════
-     ANALYTICS / SUMMARY
+     ANALYTICS / SUMMARY (unchanged: pure computation over cache)
   ══════════════════════════════ */
   const analytics = {
-    /* Returns summary within a date range [from, to] (Date objects) */
     summary(userId, from, to) {
       const ds = debitos.getAll(userId);
       const ps = pagamentos.getAll(userId);
@@ -749,7 +743,7 @@ DH.data = (() => {
         if (!from && !to) return true;
         const dt = localDate(dateStr);
         if (from && dt < from) return false;
-        if (to   && dt > to)   return false;
+        if (to && dt > to) return false;
         return true;
       };
 
@@ -761,34 +755,24 @@ DH.data = (() => {
       const activeDebt = filteredDebits.filter(d => d.status !== 'paid').reduce((s, d) => s + d.amount, 0);
       const paidDebt   = filteredDebits.filter(d => d.status === 'paid').reduce((s, d) => s + d.amount, 0);
 
-      // This month
       const now = new Date();
       const thisMonthDebits = ds.filter(d => {
         const dt = localDate(d.date);
         return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
       });
       const thisMonthAmount = thisMonthDebits.reduce((s, d) => s + d.amount, 0);
-
-      // Creditors with debts
       const creditorIds = [...new Set(filteredDebits.map(d => d.creditorId))];
 
       return {
-        totalDebt,
-        totalPaid,
-        activeDebt,
-        paidDebt,
-        thisMonth: thisMonthAmount,
+        totalDebt, totalPaid, activeDebt, paidDebt, thisMonth: thisMonthAmount,
         currency: dominantCurrency(filteredDebits),
-        creditorCount: creditorIds.length,
-        debitCount: filteredDebits.length,
-        paymentCount: filteredPayments.length,
+        creditorCount: creditorIds.length, debitCount: filteredDebits.length, paymentCount: filteredPayments.length,
       };
     },
 
-    /* Per-creditor summary */
     creditorSummary(creditorId) {
-      const ds = load('dh_debitos').filter(d => d.creditorId === creditorId);
-      const ps = load('dh_pagamentos').filter(p => p.creditorId === creditorId);
+      const ds = DH.cache.debitos.filter(d => d.creditorId === creditorId);
+      const ps = DH.cache.pagamentos.filter(p => p.creditorId === creditorId);
 
       const totalDebt  = ds.reduce((s, d) => s + d.amount, 0);
       const totalPaid  = ps.reduce((s, p) => s + p.amount, 0);
@@ -809,15 +793,14 @@ DH.data = (() => {
         currency: dominantCurrency(ds),
         thisMonthDebt: thisMonthDebits.reduce((s, d) => s + d.amount, 0),
         thisMonthPaid: thisMonthPaid.reduce((s, p) => s + p.amount, 0),
-        activeDebits:  ds.filter(d => d.status === 'active' || d.status === 'partial'),
-        paidDebits:    ds.filter(d => d.status === 'paid'),
-        debitCount:    ds.length,
-        paymentCount:  ps.length,
+        activeDebits: ds.filter(d => d.status === 'active' || d.status === 'partial'),
+        paidDebits: ds.filter(d => d.status === 'paid'),
+        debitCount: ds.length, paymentCount: ps.length,
       };
     },
   };
 
-  /* ── Settings helpers ── */
+  /* ── Settings: theme/language stay device-local (unchanged) ── */
   const settings = {
     get() {
       return {
@@ -829,31 +812,29 @@ DH.data = (() => {
     setLanguage(l) { localStorage.setItem('dh_language', l); DH.state.language = l; },
   };
 
-  /* Cities already typed anywhere in the system (credores + users), for the city suggestion list. */
+  /* City suggestions from whatever is already in cache (own data for a
+     regular user, everyone's for admin — matches what RLS lets them see). */
   function distinctCities() {
     const cities = new Set();
-    load(KEYS.credores).forEach(c => { if (c.city) cities.add(c.city.trim()); });
-    load(KEYS.users).forEach(u => { if (u.city) cities.add(u.city.trim()); });
+    DH.cache.credores.forEach(c => { if (c.city) cities.add(c.city.trim()); });
+    DH.cache.users.forEach(u => { if (u.city) cities.add(u.city.trim()); });
+    if (DH.cache.profile?.city) cities.add(DH.cache.profile.city.trim());
     return [...cities].sort((a, b) => a.localeCompare(b));
   }
-
-  /* Cities already typed anywhere in the system, narrowed to a single state (UF) —
-     used so the city suggestion list only shows once a state has been chosen. */
   function distinctCitiesForState(state) {
     if (!state) return [];
     const uf = String(state).trim().toUpperCase();
     const cities = new Set();
-    load(KEYS.credores).forEach(c => { if (c.city && (c.state || '').toUpperCase() === uf) cities.add(c.city.trim()); });
-    load(KEYS.users).forEach(u => { if (u.city && (u.state || '').toUpperCase() === uf) cities.add(u.city.trim()); });
+    DH.cache.credores.forEach(c => { if (c.city && (c.state || '').toUpperCase() === uf) cities.add(c.city.trim()); });
+    DH.cache.users.forEach(u => { if (u.city && (u.state || '').toUpperCase() === uf) cities.add(u.city.trim()); });
+    if (DH.cache.profile?.city && (DH.cache.profile.state || '').toUpperCase() === uf) cities.add(DH.cache.profile.city.trim());
     return [...cities].sort((a, b) => a.localeCompare(b));
   }
 
-  users.seedAdmin();
-  plans.seedDefaults();
-  plans.reconcileDefaults();
-
-  /* ── Public API ── */
-  return { uuid, toSlug, share, users, session, credores, debitos, pagamentos, billing, plans, analytics, settings, isValidCPF, formatCPF, distinctCities, distinctCitiesForState };
+  return {
+    uuid, toSlug, share, users, session, credores, debitos, pagamentos, billing, plans, analytics, settings,
+    isValidCPF, formatCPF, distinctCities, distinctCitiesForState, bootstrap,
+  };
 })();
 
 /* ══════════════════════════════════════════
@@ -900,15 +881,9 @@ DH.geo = (() => {
 
   function countries(lang) {
     const nameIdx = lang === 'en' ? 2 : 1;
-    return COUNTRIES
-      .map(c => ({ code: c[0], name: c[nameIdx] }))
-      .sort((a, b) => a.name.localeCompare(b.name, lang === 'en' ? 'en' : 'pt'));
+    return COUNTRIES.map(c => ({ code: c[0], name: c[nameIdx] })).sort((a, b) => a.name.localeCompare(b.name, lang === 'en' ? 'en' : 'pt'));
   }
-
-  function states() {
-    return BR_STATES.map(s => ({ uf: s[0], name: s[1] }));
-  }
-
+  function states() { return BR_STATES.map(s => ({ uf: s[0], name: s[1] })); }
   return { countries, states };
 })();
 
@@ -922,15 +897,11 @@ DH.currency = (() => {
     USD: { locale: 'en-US', currency: 'USD' },
     GBP: { locale: 'en-GB', currency: 'GBP' },
   };
-
   function format(amount, currencyCode) {
     const code = currencyCode || 'BRL';
     const cfg  = configs[code] || configs.BRL;
-    return new Intl.NumberFormat(cfg.locale, {
-      style: 'currency', currency: cfg.currency, minimumFractionDigits: 0, maximumFractionDigits: 2,
-    }).format(amount || 0);
+    return new Intl.NumberFormat(cfg.locale, { style: 'currency', currency: cfg.currency, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount || 0);
   }
-
   return { format, list: () => Object.keys(configs) };
 })();
 
@@ -945,65 +916,39 @@ DH.dates = (() => {
     const opts = { day: '2-digit', month: '2-digit', year: 'numeric' };
     return d.toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US', opts);
   }
-
   function formatMonthYear(isoString) {
     if (!isoString) return '';
     const d = new Date(isoString + (isoString.includes('T') ? '' : 'T00:00:00'));
-    const lang = DH.state.language || 'pt';
     const months = DH.i18n.t('month_names');
     return `${months[d.getMonth()]} ${d.getFullYear()}`;
   }
-
-  function today() {
-    return new Date().toISOString().split('T')[0];
-  }
+  function today() { return new Date().toISOString().split('T')[0]; }
 
   function rangeFromFilter(filter) {
     const now = new Date();
     const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
     let from;
     switch (filter) {
-      case 'today':
-        from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        break;
-      case 'month':
-        from = new Date(now.getFullYear(), now.getMonth(), 1);
-        break;
-      case '3m':
-        from = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-        break;
-      case '6m':
-        from = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
-        break;
-      case '1y':
-        from = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-        break;
-      default:
-        from = null;
+      case 'today': from = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+      case 'month': from = new Date(now.getFullYear(), now.getMonth(), 1); break;
+      case '3m': from = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()); break;
+      case '6m': from = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()); break;
+      case '1y': from = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
+      default: from = null;
     }
     return { from, to };
   }
 
-  /* Revenue filter range: last 30 days (default), 3/6/12 months, or all time. */
   function rangeForBilling(filter) {
     const now = new Date();
     const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
     let from;
     switch (filter) {
-      case '30d':
-        from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-        break;
-      case '3m':
-        from = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-        break;
-      case '6m':
-        from = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
-        break;
-      case '1y':
-        from = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-        break;
-      default:
-        from = null; // 'all'
+      case '30d': from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30); break;
+      case '3m': from = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()); break;
+      case '6m': from = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()); break;
+      case '1y': from = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
+      default: from = null;
     }
     return { from, to };
   }

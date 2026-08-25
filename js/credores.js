@@ -59,7 +59,7 @@ DH.credores = (() => {
   }
 
   /* ── Save (create or update) ── */
-  function saveCredor() {
+  async function saveCredor() {
     clearErrors();
     const id    = document.getElementById('credor-id').value;
     const name  = document.getElementById('credor-name').value.trim();
@@ -74,10 +74,10 @@ DH.credores = (() => {
     const userId = DH.state.currentUser.id;
 
     if (id) {
-      DH.data.credores.update(id, { name, city, state, phone });
+      await DH.data.credores.update(id, { name, city, state, phone });
       DH.ui.showToast(T('toast_credor_updated'), 'success');
     } else {
-      DH.data.credores.create(userId, { name, city, state, phone });
+      await DH.data.credores.create(userId, { name, city, state, phone });
       DH.ui.showToast(T('toast_credor_created'), 'success');
     }
 
@@ -89,8 +89,8 @@ DH.credores = (() => {
 
   /* ── Delete ── */
   function deleteCredor(creditorId) {
-    DH.ui.confirm(T('credor_delete_confirm'), () => {
-      DH.data.credores.delete(creditorId);
+    DH.ui.confirm(T('credor_delete_confirm'), async () => {
+      await DH.data.credores.delete(creditorId);
       DH.ui.showToast(T('toast_credor_deleted'), 'info');
       DH.dashboard.closeDetail();
       DH.dashboard.renderAll();
