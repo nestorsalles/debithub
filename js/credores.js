@@ -27,7 +27,7 @@ DH.credores = (() => {
     const cityInput = document.getElementById('credor-city');
     if (!cityInput) return;
     cityInput.disabled = !uf;
-    cityInput.placeholder = uf ? 'Ex: Fortaleza' : T('city_select_state_first');
+    cityInput.placeholder = uf ? '' : T('city_select_state_first');
   }
 
   /* ── Open New Credor Modal ── */
@@ -118,8 +118,7 @@ DH.credores = (() => {
     const form = document.getElementById('credor-form');
     if (!form) return;
 
-    form.addEventListener('submit', e => { e.preventDefault(); saveCredor(); });
-    form.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveCredor(); } });
+    DH.ui.onSubmitOnce(form, saveCredor);
 
     // Phone mask
     const phoneInput = document.getElementById('credor-phone');

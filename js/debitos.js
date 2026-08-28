@@ -336,14 +336,10 @@ DH.debitos = (() => {
 
     // Debit form submit
     const debitForm = document.getElementById('debit-form');
-    if (debitForm) {
-      debitForm.addEventListener('submit', e => { e.preventDefault(); saveDebit(); });
-    }
+    if (debitForm) DH.ui.onSubmitOnce(debitForm, saveDebit);
     // Payment form submit
     const paymentForm = document.getElementById('payment-form');
-    if (paymentForm) {
-      paymentForm.addEventListener('submit', e => { e.preventDefault(); savePayment(); });
-    }
+    if (paymentForm) DH.ui.onSubmitOnce(paymentForm, savePayment);
     // Type change
     const typeEl = document.getElementById('debit-type');
     if (typeEl) typeEl.addEventListener('change', handleTypeChange);

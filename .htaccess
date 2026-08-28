@@ -1,0 +1,38 @@
+# ============================================================
+# DebitHub — Apache config (Hostinger and other Apache hosts)
+# ============================================================
+
+# Make sure .js/.css are served with the correct MIME type. Some shared-hosting
+# setups fall back to a generic type for these, and modern browsers refuse to
+# execute a <script> whose response isn't application/javascript — which looks
+# exactly like "the code is broken" even though the file itself is fine.
+<IfModule mod_mime.c>
+  AddType application/javascript .js
+  AddType text/css .css
+  AddType image/svg+xml .svg
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js)$">
+    Header set Content-Type "application/javascript; charset=UTF-8"
+  </FilesMatch>
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Canonical URLs: redirect visible "/page.html" to "/page" (skips this file itself)
+  RewriteCond %{THE_REQUEST} \s/+([^?\s]+)\.html[\s?] [NC]
+  RewriteCond %{REQUEST_FILENAME} !\.htaccess$
+  RewriteRule ^ /%1 [R=301,L]
+
+  # Serve the matching .html file for a clean URL, without changing what's in the address bar
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_FILENAME}\.html -f
+  RewriteRule ^([^.]+)$ $1.html [L]
+</IfModule>
+
+# Treat index.html as the default document for the site root
+DirectoryIndex index.html

@@ -36,9 +36,29 @@ DH.ui = (() => {
     const overlay = document.getElementById(id);
     if (!overlay) return;
     overlay.classList.remove('open');
+    // Blur whatever still has focus inside — the overlay keeps rendering during its
+    // fade-out transition, so a lingering focused field could catch a stray Enter
+    // keypress and resubmit the form a second time with the same (unreset) values.
+    if (document.activeElement && overlay.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
   }
   function closeAllModals() {
     document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
+  }
+
+  /* ── Guard a form's submit handler against firing twice for one user action
+     (double Enter, double-click, or a stray keydown+submit combo). ── */
+  function onSubmitOnce(form, handler) {
+    if (!form) return;
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      if (form.dataset.busy === '1') return;
+      form.dataset.busy = '1';
+      try { handler(e); } finally {
+        setTimeout(() => { delete form.dataset.busy; }, 600);
+      }
+    });
   }
 
   /* ── Panel helpers ── */
@@ -229,6 +249,7 @@ DH.ui = (() => {
   return {
     showToast,
     openModal, closeModal, closeAllModals,
+    onSubmitOnce,
     openPanel, closePanel,
     confirm, _confirmOk, _confirmCancel,
     initTheme, applyTheme, toggleTheme,

@@ -226,8 +226,8 @@ DH.admin = (() => {
                       <td>${accountStatusBadge(a.status)}</td>
                       <td>${statusBadge(a.current)}</td>
                       <td title="${a.credCount} ${T('admin_col_credores')} · ${a.debitCount} ${T('admin_col_debitos')}">${a.credCount} / ${a.debitCount}</td>
-                      <td>
-                        <div style="display:flex;gap:.3rem;justify-content:flex-end;flex-wrap:wrap;">
+                      <td style="white-space:nowrap;">
+                        <div style="display:flex;gap:.3rem;justify-content:flex-end;flex-wrap:nowrap;">
                           <button class="btn-icon btn-icon-success" title="${T('admin_modal_mark_paid')}" data-icon="dollar-sign"
                             onclick="DH.admin.openBillingModal('${a.id}')"></button>
                           ${accountStatusToggleBtn(a)}
@@ -916,11 +916,11 @@ DH.admin = (() => {
   function init() {
     DH.moneyField.mount();
     const form = document.getElementById('billing-form');
-    if (form) form.addEventListener('submit', e => { e.preventDefault(); saveBilling(); });
+    if (form) DH.ui.onSubmitOnce(form, saveBilling);
     const planForm = document.getElementById('plan-form');
-    if (planForm) planForm.addEventListener('submit', e => { e.preventDefault(); savePlan(); });
+    if (planForm) DH.ui.onSubmitOnce(planForm, savePlan);
     const accountForm = document.getElementById('account-form');
-    if (accountForm) accountForm.addEventListener('submit', e => { e.preventDefault(); saveAccount(); });
+    if (accountForm) DH.ui.onSubmitOnce(accountForm, saveAccount);
   }
 
   return {

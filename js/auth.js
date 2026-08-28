@@ -78,8 +78,16 @@ DH.auth = (() => {
   ════════════════════════════════ */
   function initTabs() {
     const headers = document.querySelectorAll('.tab-header');
-    headers.forEach(header => {
-      header.addEventListener('click', () => {
+    if (!headers.length) return;
+    const container = document.querySelector('.login-card') || document.body;
+
+    // A single delegated listener (bound once, guarded) instead of one per header —
+    // this can't silently double-bind if initTabs() is ever invoked more than once.
+    if (!container.dataset.tabsBound) {
+      container.dataset.tabsBound = '1';
+      container.addEventListener('click', e => {
+        const header = e.target.closest('.tab-header');
+        if (!header) return;
         const isActive = header.classList.contains('active');
         document.querySelectorAll('.tab-header').forEach(h => h.classList.remove('active'));
         document.querySelectorAll('.tab-body').forEach(b => b.classList.remove('open'));
@@ -89,12 +97,17 @@ DH.auth = (() => {
           if (body && body.classList.contains('tab-body')) body.classList.add('open');
         }
       });
-    });
-    if (headers.length > 0) {
-      headers[0].classList.add('active');
-      const firstBody = headers[0].nextElementSibling;
-      if (firstBody) firstBody.classList.add('open');
     }
+
+    // Deterministic initial state: Register only when the page was opened with
+    // #register, Login otherwise — idempotent, safe to (re)run.
+    document.querySelectorAll('.tab-header').forEach(h => h.classList.remove('active'));
+    document.querySelectorAll('.tab-body').forEach(b => b.classList.remove('open'));
+    const wantRegister = window.location.hash === '#register';
+    const target = (wantRegister && document.getElementById('register-tab-header')) || headers[0];
+    target.classList.add('active');
+    const body = target.nextElementSibling;
+    if (body && body.classList.contains('tab-body')) body.classList.add('open');
   }
 
   /* ════════════════════════════════
@@ -103,7 +116,7 @@ DH.auth = (() => {
   function initLoginForm() {
     const form = document.getElementById('login-form');
     if (!form) return;
-    form.addEventListener('submit', handleLogin);
+    DH.ui.onSubmitOnce(form, handleLogin);
   }
 
   async function handleLogin(e) {
@@ -209,7 +222,7 @@ DH.auth = (() => {
     const cityInput = document.getElementById('reg-city');
     if (!cityInput) return;
     cityInput.disabled = !enabled;
-    cityInput.placeholder = enabled ? 'Fortaleza' : DH.i18n.t('city_select_state_first');
+    cityInput.placeholder = enabled ? '' : DH.i18n.t('city_select_state_first');
     if (!enabled) cityInput.value = '';
   }
 
@@ -240,7 +253,7 @@ DH.auth = (() => {
     const form = document.getElementById('register-form');
     if (!form) return;
 
-    form.addEventListener('submit', handleRegister);
+    DH.ui.onSubmitOnce(form, handleRegister);
 
     populateCountrySelect();
     populateStateField();
@@ -372,7 +385,7 @@ DH.auth = (() => {
       if (e.key === 'Escape' && overlay.classList.contains('open')) closeForgotModal();
     });
 
-    form.addEventListener('submit', handleForgotPassword);
+    DH.ui.onSubmitOnce(form, handleForgotPassword);
     updateStrengthBar('forgot-new-password', 'forgot-strength-bar', 'forgot-strength-text');
   }
 
@@ -429,7 +442,7 @@ DH.auth = (() => {
   function initChangePassword() {
     const form = document.getElementById('change-password-form');
     if (!form) return;
-    form.addEventListener('submit', handleChangePassword);
+    DH.ui.onSubmitOnce(form, handleChangePassword);
     updateStrengthBar('change-new-password', 'change-strength-bar', 'change-strength-text');
   }
 

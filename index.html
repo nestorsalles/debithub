@@ -126,7 +126,7 @@
                 <span class="form-error hidden" id="reg-country-error"></span>
               </div>
 
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+              <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:.75rem;">
                 <div class="form-group" id="reg-state-wrap">
                   <label class="form-label" for="reg-state"><span data-i18n="credor_state">Estado</span> <span class="req-mark">*</span></label>
                   <select class="form-select" id="reg-state" required></select>
@@ -134,7 +134,7 @@
                 </div>
                 <div class="form-group">
                   <label class="form-label" for="reg-city"><span data-i18n="credor_city">Cidade</span> <span class="req-mark">*</span></label>
-                  <input type="text" class="form-input" id="reg-city" list="city-datalist" placeholder="Fortaleza" autocomplete="address-level2" required>
+                  <input type="text" class="form-input" id="reg-city" list="city-datalist" autocomplete="address-level2" required>
                   <span class="form-error hidden" id="reg-city-error"></span>
                 </div>
               </div>
@@ -317,18 +317,9 @@
     // Update lang select
     document.querySelectorAll('[data-lang-select]').forEach(s2 => s2.value = s.language);
 
-    // Init auth
+    // Init auth (also sets the initial Login/Register accordion state,
+    // opening Register instead when the URL has #register)
     DH.auth.init();
-
-    // Handle hash for auto-tab (e.g., index.html#register)
-    if (window.location.hash === '#register') {
-      const loginHeader = document.getElementById('login-tab-header');
-      const loginBody   = document.getElementById('login-tab-body');
-      const regHeader   = document.getElementById('register-tab-header');
-      const regBody     = document.getElementById('register-tab-body');
-      if (loginHeader) { loginHeader.classList.remove('active'); loginBody.classList.remove('open'); }
-      if (regHeader)   { regHeader.classList.add('active');   regBody.classList.add('open'); }
-    }
   })();
 </script>
 </body>

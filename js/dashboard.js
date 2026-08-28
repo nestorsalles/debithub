@@ -638,7 +638,7 @@ DH.dashboard = (() => {
               <select class="form-select" id="settings-country"></select>
             </div>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem;">
+            <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:.75rem;margin-bottom:1rem;">
               <div class="form-group" id="settings-state-wrap">
                 <label class="form-label">${T('credor_state')}</label>
                 <select class="form-select" id="settings-state"></select>
