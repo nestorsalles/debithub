@@ -126,7 +126,7 @@
                 <span class="form-error hidden" id="reg-country-error"></span>
               </div>
 
-              <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:.75rem;">
+              <div class="city-state-row">
                 <div class="form-group" id="reg-state-wrap">
                   <label class="form-label" for="reg-state"><span data-i18n="credor_state">Estado</span> <span class="req-mark">*</span></label>
                   <select class="form-select" id="reg-state" required></select>
@@ -291,7 +291,7 @@
     // Already logged in? Send straight to the right area.
     const profile = await DH.data.bootstrap();
     if (profile) {
-      window.location.href = profile.role === 'admin' ? 'admin.html' : 'dashboard.html';
+      window.location.href = profile.role === 'admin' ? 'admin' : 'dashboard';
       return;
     }
 

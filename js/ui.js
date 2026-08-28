@@ -48,15 +48,23 @@ DH.ui = (() => {
   }
 
   /* ── Guard a form's submit handler against firing twice for one user action
-     (double Enter, double-click, or a stray keydown+submit combo). ── */
+     (double Enter, double-click, or a stray keydown+submit combo). Save handlers
+     now do a real network round-trip (Supabase), so the guard stays up for the
+     full duration of the (possibly async) handler, not a fixed timeout — and the
+     submit button is disabled meanwhile so a second Enter has nothing to submit. */
   function onSubmitOnce(form, handler) {
     if (!form) return;
-    form.addEventListener('submit', e => {
+    form.addEventListener('submit', async e => {
       e.preventDefault();
       if (form.dataset.busy === '1') return;
       form.dataset.busy = '1';
-      try { handler(e); } finally {
-        setTimeout(() => { delete form.dataset.busy; }, 600);
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        await handler(e);
+      } finally {
+        delete form.dataset.busy;
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }

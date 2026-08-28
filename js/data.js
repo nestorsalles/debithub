@@ -73,24 +73,6 @@ DH.data = (() => {
     return cpf.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4').trim();
   }
 
-  /* ── Self-contained share-link encoding (URL-safe base64 of JSON) ──
-     Unchanged: the public "d=" share link never touches Supabase. */
-  const share = {
-    encode(obj) {
-      const json = JSON.stringify(obj);
-      return btoa(unescape(encodeURIComponent(json)))
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    },
-    decode(str) {
-      try {
-        let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-        while (b64.length % 4) b64 += '=';
-        const json = decodeURIComponent(escape(atob(b64)));
-        return JSON.parse(json);
-      } catch { return null; }
-    },
-  };
-
   /* ══════════════════════════════
      Row <-> app-shape mappers
      (DB columns are snake_case; the app's HTML/JS everywhere
@@ -106,7 +88,7 @@ DH.data = (() => {
     };
   }
   function mapCredor(r) {
-    return { id: r.id, userId: r.user_id, name: r.name, slug: r.slug, city: r.city || '', state: r.state || '', phone: r.phone || '', createdAt: r.created_at };
+    return { id: r.id, userId: r.user_id, name: r.name, slug: r.slug, publicCode: r.public_code, city: r.city || '', state: r.state || '', phone: r.phone || '', createdAt: r.created_at };
   }
   function mapDebito(r) {
     return {
@@ -408,16 +390,14 @@ DH.data = (() => {
     getAll(userId) { return DH.cache.credores.filter(c => c.userId === userId); },
     getAllPublic() { return DH.cache.credores; },
     getById(id) { return DH.cache.credores.find(c => c.id === id) || null; },
-    getBySlug(slug) { return DH.cache.credores.find(c => c.slug === slug) || null; },
 
+    /* slug is purely cosmetic (readable name in the URL) — it does NOT need to
+       be unique. The public link's real identifier is public_code, a number
+       Postgres assigns automatically on insert (see schema.sql), which is
+       what disambiguates two people both named "João Silva". */
     async create(userId, { name, city, state, phone }) {
-      const baseSlug = toSlug(name);
-      let slug = baseSlug, count = 1;
-      const mine = () => DH.cache.credores.filter(c => c.userId === userId);
-      while (mine().some(c => c.slug === slug)) { slug = baseSlug + '-' + count++; }
-
       const { data, error } = await DH.sb.from('credores').insert({
-        user_id: userId, name: name.trim(), slug, city: city.trim(), state: state.trim().toUpperCase(), phone: phone.trim(),
+        user_id: userId, name: name.trim(), slug: toSlug(name), city: city.trim(), state: state.trim().toUpperCase(), phone: phone.trim(),
       }).select('*').single();
       throwIfError(error);
       const credor = mapCredor(data);
@@ -426,15 +406,8 @@ DH.data = (() => {
     },
 
     async update(id, { name, city, state, phone }) {
-      const existing = this.getById(id);
-      if (!existing) return null;
-      const baseSlug = toSlug(name);
-      let slug = baseSlug, count = 1;
-      const mine = () => DH.cache.credores.filter(c => c.userId === existing.userId && c.id !== id);
-      while (mine().some(c => c.slug === slug)) { slug = baseSlug + '-' + count++; }
-
       const { data, error } = await DH.sb.from('credores').update({
-        name: name.trim(), slug, city: city.trim(), state: state.trim().toUpperCase(), phone: phone.trim(),
+        name: name.trim(), slug: toSlug(name), city: city.trim(), state: state.trim().toUpperCase(), phone: phone.trim(),
       }).eq('id', id).select('*').single();
       throwIfError(error);
       const updated = mapCredor(data);
@@ -451,34 +424,23 @@ DH.data = (() => {
       DH.cache.pagamentos = DH.cache.pagamentos.filter(p => p.creditorId !== id);
     },
 
-    /* Self-contained snapshot for the public share link — unchanged,
-       reads only from the already-populated cache. */
-    snapshotFor(creditorId) {
+    /* Personalized public link: debithub.com.br/credor/<slug>/<public_code>.
+       The public page (credor-view.js) resolves ONLY the numeric code live
+       against Supabase (get_public_credor) — the slug is just for readability
+       and stays valid even if the credor is later renamed. */
+    buildShareLink(creditorId) {
       const credor = this.getById(creditorId);
       if (!credor) return null;
-      const debtor = users.getById(credor.userId);
-      const allDebits = DH.cache.debitos.filter(d => d.creditorId === creditorId);
-      const debitIds = new Set(allDebits.map(d => d.id));
-      const allPayments = DH.cache.pagamentos.filter(p => debitIds.has(p.debitId));
-      return {
-        v: 1,
-        credor: { name: credor.name, city: credor.city, state: credor.state, phone: credor.phone },
-        debtor: { name: debtor ? debtor.name : '' },
-        debits: allDebits.map(d => ({
-          id: d.id, description: d.description, date: d.date, amount: d.amount,
-          currency: d.currency || 'BRL', category: d.category || '',
-          type: d.type, installments: d.installments, installmentAmount: d.installmentAmount, status: d.status,
-        })),
-        payments: allPayments.map(p => ({ id: p.id, debitId: p.debitId, amount: p.amount, date: p.date, note: p.note || '' })),
-      };
+      return `${window.location.origin}/credor/${credor.slug}/${credor.publicCode}`;
     },
 
-    buildShareLink(creditorId) {
-      const snap = this.snapshotFor(creditorId);
-      if (!snap) return null;
-      const encoded = share.encode(snap);
-      const base = window.location.origin + window.location.pathname.replace('dashboard.html', '');
-      return `${base}credor.html#d=${encoded}`;
+    /* Fetches one credor's public summary (name/city/state/phone, debtor name,
+       debits, payments) by public_code — no auth, callable from the public
+       credor page. Returns null if the code doesn't match any credor. */
+    async fetchPublicByCode(code) {
+      const { data, error } = await DH.sb.rpc('get_public_credor', { p_code: code });
+      throwIfError(error);
+      return data || null;
     },
   };
 
@@ -838,7 +800,7 @@ DH.data = (() => {
   }
 
   return {
-    uuid, toSlug, share, users, session, credores, debitos, pagamentos, billing, plans, analytics, settings,
+    uuid, toSlug, users, session, credores, debitos, pagamentos, billing, plans, analytics, settings,
     isValidCPF, formatCPF, distinctCities, distinctCitiesForState, bootstrap,
   };
 })();

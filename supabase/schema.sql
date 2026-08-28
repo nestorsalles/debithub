@@ -36,16 +36,20 @@ create table public.profiles (
 );
 
 -- ── credores ───────────────────────────────────────────────
+-- The public share link is debithub.com.br/credor/<slug>/<public_code>.
+-- slug is just a readable name (not unique — two "João Silva"s can share
+-- one) and public_code is the real identifier: an auto-numbered, globally
+-- unique column that disambiguates them and stays stable across renames.
 create table public.credores (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   name text not null,
   slug text not null,
+  public_code bigint generated always as identity (start with 100000) unique,
   city text,
   state text,
   phone text,
-  created_at timestamptz not null default now(),
-  unique (user_id, slug)
+  created_at timestamptz not null default now()
 );
 
 -- ── debitos ────────────────────────────────────────────────
@@ -206,6 +210,54 @@ create policy pagamentos_all on public.pagamentos for all
 create policy billing_admin_only on public.billing for all
   using (public.is_admin())
   with check (public.is_admin());
+
+-- ============================================================
+-- Public creditor page (debithub.com.br/credor/<slug>/<public_code>) —
+-- no login. Rather than opening a permissive RLS "select" policy on
+-- credores/debitos/pagamentos (which would let anon list every row in
+-- those tables, not just the one the code points at), this function
+-- runs as security definer and hand-picks exactly the fields the public
+-- page needs for ONE credor, looked up by its unique public_code (the
+-- slug in the URL is decorative and is never used for the lookup).
+-- ============================================================
+create function public.get_public_credor(p_code bigint) returns jsonb
+language plpgsql security definer set search_path = public stable as $$
+declare
+  v_credor public.credores%rowtype;
+  v_debtor_name text;
+  result jsonb;
+begin
+  select * into v_credor from public.credores where public_code = p_code;
+  if not found then
+    return null;
+  end if;
+
+  select name into v_debtor_name from public.profiles where id = v_credor.user_id;
+
+  select jsonb_build_object(
+    'credor', jsonb_build_object('name', v_credor.name, 'city', v_credor.city, 'state', v_credor.state, 'phone', v_credor.phone),
+    'debtor', jsonb_build_object('name', coalesce(v_debtor_name, '')),
+    'debits', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', d.id, 'description', d.description, 'date', d.date, 'amount', d.amount,
+        'currency', d.currency, 'category', d.category, 'type', d.type,
+        'installments', d.installments, 'installmentAmount', d.installment_amount, 'status', d.status
+      ))
+      from public.debitos d where d.creditor_id = v_credor.id
+    ), '[]'::jsonb),
+    'payments', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', p.id, 'debitId', p.debit_id, 'amount', p.amount, 'date', p.date, 'note', p.note
+      ))
+      from public.pagamentos p where p.debit_id in (select id from public.debitos where creditor_id = v_credor.id)
+    ), '[]'::jsonb)
+  ) into result;
+
+  return result;
+end;
+$$;
+
+grant execute on function public.get_public_credor(bigint) to anon, authenticated;
 
 -- ============================================================
 -- One-time setup, AFTER running this file:

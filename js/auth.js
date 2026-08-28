@@ -149,7 +149,7 @@ DH.auth = (() => {
     }
 
     toast(DH.i18n.t('toast_login_success'), 'success');
-    const dest = result.user.role === 'admin' ? 'admin.html' : 'dashboard.html';
+    const dest = result.user.role === 'admin' ? 'admin' : 'dashboard';
     setTimeout(() => { window.location.href = dest; }, 600);
   }
 
@@ -365,7 +365,7 @@ DH.auth = (() => {
     }
 
     toast(DH.i18n.t('toast_register_success'), 'success');
-    setTimeout(() => { window.location.href = 'dashboard.html'; }, 700);
+    setTimeout(() => { window.location.href = 'dashboard'; }, 700);
   }
 
   /* ════════════════════════════════

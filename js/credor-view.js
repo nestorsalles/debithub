@@ -1,9 +1,9 @@
 /* ============================================================
    DebitHub — Public Creditor View
-   Renders the public-facing page at credor.html#d=<encoded-data>
-   The data travels inside the link itself (self-contained snapshot),
-   so the page works for anyone, on any device — no login required,
-   and no call to Supabase at all.
+   Renders the public-facing page at /credor/<slug>/<public_code>. Only
+   the numeric code is actually looked up (get_public_credor RPC) — the
+   slug is decorative, so it stays readable even after a credor renames.
+   No login required, but it IS a real network call.
    ============================================================ */
 
 window.DH = window.DH || {};
@@ -37,19 +37,33 @@ DH.credorView = (() => {
     return `<span class="chip"><span data-icon="${categoryIcon(cat)}"></span>${T(CATEGORY_KEYS[cat])}</span>`;
   }
 
-  function init() {
-    const hash = window.location.hash.replace('#', '');
+  function codeFromLocation() {
+    const pathMatch = window.location.pathname.match(/\/credor\/[a-z0-9-]+\/(\d+)\/?$/i);
+    if (pathMatch) return pathMatch[1];
+    // Fallback for local/dev servers that don't apply the .htaccess rewrite.
+    return new URLSearchParams(window.location.search).get('code');
+  }
+
+  async function init() {
     currentFilter = 'month'; customFrom = null; customTo = null;
 
-    if (!hash) { currentData = null; renderNotFound(); return; }
+    const code = codeFromLocation();
+    if (!code) { currentData = null; renderNotFound(); return; }
 
-    if (!hash.startsWith('d=')) { currentData = null; renderNotFound(); return; }
+    renderLoading();
+    try {
+      const data = await DH.data.credores.fetchPublicByCode(Number(code));
+      if (!data || !data.credor) { currentData = null; renderNotFound(); return; }
+      currentData = data;
+      renderDashboard();
+    } catch {
+      currentData = null; renderNotFound();
+    }
+  }
 
-    const decoded = DH.data.share.decode(hash.slice(2));
-    if (!decoded || !decoded.credor) { currentData = null; renderNotFound(); return; }
-    currentData = decoded;
-
-    renderDashboard();
+  function renderLoading() {
+    const content = document.getElementById('credor-content');
+    if (content) content.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:3rem;"><div class="spinner"></div></div>`;
   }
 
   function renderNotFound() {

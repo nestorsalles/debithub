@@ -16,7 +16,7 @@
 
   <!-- Header -->
   <header class="credor-header">
-    <a href="index.html" class="header-brand" style="text-decoration:none;">
+    <a href="index" class="header-brand" style="text-decoration:none;">
       <div class="brand-logo-full brand-logo-full-sm" role="img" aria-label="DebitHub">
         <img class="brand-logo-img-light" src="img/logo-debithub-horizontal-claro.png" alt="">
         <img class="brand-logo-img-dark" src="img/logo-debithub-horizontal-escuro.png" alt="">
@@ -53,7 +53,7 @@
   <div class="credor-promo" id="credor-promo" style="display:none;">
     <span data-icon="wallet"></span>
     <span id="credor-promo-text"></span>
-    <a href="landing.html" class="credor-promo-link">
+    <a href="landing" class="credor-promo-link">
       <span id="credor-promo-cta"></span> <span data-icon="arrow-right"></span>
     </a>
   </div>
@@ -66,6 +66,8 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabase-client.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/date-field.js"></script>
 <script src="js/i18n.js"></script>
@@ -74,7 +76,7 @@
 <script src="js/credor-view.js"></script>
 
 <script>
-(function() {
+(async function() {
   // Load settings (theme/language are still a local device preference)
   const s = DH.data.settings.get();
   DH.state.theme    = s.theme;
@@ -88,26 +90,20 @@
 
   document.querySelectorAll('[data-lang-select]').forEach(el => el.value = s.language);
 
-  // Update hero avatar with initials after credor loads
+  // Update hero avatar with initials after the credor's data has loaded
   function syncAvatar() {
     const heroName = document.getElementById('hero-name');
     const heroAvatar = document.getElementById('hero-avatar');
     if (heroAvatar && heroName) heroAvatar.textContent = DH.ui.getInitials(heroName.textContent || '?');
   }
 
-  // Init the public view
-  DH.credorView.init();
+  // Init the public view (fetches the credor by slug from Supabase)
+  await DH.credorView.init();
   syncAvatar();
 
-  // Language switcher re-renders the view content
+  // Language switcher re-fetches + re-renders the view content
   document.querySelectorAll('[data-lang-select]').forEach(sel => {
-    sel.addEventListener('change', () => { DH.credorView.init(); syncAvatar(); });
-  });
-
-  // Handle hash changes (e.g., if navigating between creditors)
-  window.addEventListener('hashchange', () => {
-    DH.credorView.init();
-    syncAvatar();
+    sel.addEventListener('change', async () => { await DH.credorView.init(); syncAvatar(); });
   });
 })();
 </script>

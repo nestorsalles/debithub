@@ -21,7 +21,7 @@
 <header class="app-header">
   <button class="btn-icon" id="hamburger-btn" style="display:none;" title="Menu" data-icon="menu"></button>
 
-  <a href="dashboard.html" class="header-brand">
+  <a href="dashboard" class="header-brand">
     <div class="brand-logo-full brand-logo-full-sm" role="img" aria-label="DebitHub">
       <img class="brand-logo-img-light" src="img/logo-debithub-horizontal-claro.png" alt="">
       <img class="brand-logo-img-dark" src="img/logo-debithub-horizontal-escuro.png" alt="">
@@ -148,16 +148,16 @@
           <input type="text" class="form-input" id="credor-name" placeholder="Ex: João Silva">
           <span class="form-error hidden" id="credor-name-error"></span>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:.75rem;">
-          <div class="form-group">
-            <label class="form-label" data-i18n="credor_city">Cidade</label>
-            <input type="text" class="form-input" id="credor-city" list="city-datalist">
-            <span class="form-error hidden" id="credor-city-error"></span>
-          </div>
+        <div class="city-state-row">
           <div class="form-group">
             <label class="form-label" data-i18n="credor_state">Estado</label>
             <select class="form-select" id="credor-state"></select>
             <span class="form-error hidden" id="credor-state-error"></span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="credor_city">Cidade</label>
+            <input type="text" class="form-input" id="credor-city" list="city-datalist">
+            <span class="form-error hidden" id="credor-city-error"></span>
           </div>
         </div>
         <div class="form-group">
@@ -359,7 +359,7 @@ window.DH = window.DH || {};
 DH.app = {
   async logout() {
     await DH.data.session.clear();
-    window.location.href = 'index.html';
+    window.location.href = 'index';
   }
 };
 
@@ -371,10 +371,10 @@ DH.app = {
   try {
     profile = await DH.data.bootstrap();
   } catch {
-    window.location.href = 'index.html'; return;
+    window.location.href = 'index'; return;
   }
-  if (!profile) { window.location.href = 'index.html'; return; }
-  if (profile.role === 'admin') { window.location.href = 'admin.html'; return; }
+  if (!profile) { window.location.href = 'index'; return; }
+  if (profile.role === 'admin') { window.location.href = 'admin'; return; }
 
   // Load settings
   const s = DH.data.settings.get();

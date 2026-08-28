@@ -27,6 +27,12 @@
   RewriteCond %{REQUEST_FILENAME} !\.htaccess$
   RewriteRule ^ /%1 [R=301,L]
 
+  # Personalized creditor link: /credor/<slug>/<public_code> serves credor.html
+  # without changing the address bar — both segments are read client-side from
+  # window.location.pathname (see js/credor-view.js); only the numeric code
+  # is actually looked up, the slug is just for readability.
+  RewriteRule ^credor/[a-z0-9-]+/[0-9]+/?$ credor.html [L]
+
   # Serve the matching .html file for a clean URL, without changing what's in the address bar
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
