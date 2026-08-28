@@ -839,7 +839,7 @@ DH.admin = (() => {
         <div style="display:grid;gap:1.5rem;max-width:600px;">
           <div class="card">
             <h3 style="margin-bottom:1.25rem;display:flex;align-items:center;gap:.5rem;"><span data-icon="user"></span> ${T('settings_account')}</h3>
-            <div class="form-group" style="margin-bottom:1rem;">
+            <div class="form-group" style="margin-bottom:1.5rem;">
               <label class="form-label">${T('field_name')}</label>
               <div style="display:flex;gap:.6rem;">
                 <input class="form-input" id="settings-name" value="${escapeHtml(user.name)}" style="flex:1;">

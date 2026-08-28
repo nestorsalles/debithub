@@ -377,7 +377,7 @@ h4 { font-size: 1rem; }
 .modal-close { background: var(--surface-3); border: none; color: var(--text-muted); width: 32px; height: 32px; border-radius: var(--radius); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1rem; transition: all var(--transition-fast); }
 .modal-close:hover { background: var(--danger-dim); color: var(--danger); }
 
-.modal-body { display: flex; flex-direction: column; gap: 1rem; }
+.modal-body { display: flex; flex-direction: column; gap: 1.5rem; }
 .modal-footer { margin-top: 1.5rem; display: flex; gap: 0.75rem; justify-content: flex-end; }
 
 /* ── Toast ── */
@@ -520,7 +520,7 @@ h4 { font-size: 1rem; }
 .tab-body.open { max-height: 3200px; }
 
 .tab-content { padding: 1.5rem 1.75rem; display: flex; flex-direction: column; gap: 1.1rem; }
-.tab-content form { display: flex; flex-direction: column; gap: 1.25rem; }
+.tab-content form { display: flex; flex-direction: column; gap: 1.5rem; }
 
 /* Login helpers */
 .login-controls {
@@ -695,7 +695,7 @@ h4 { font-size: 1rem; }
    Always stacked (never side by side) — full state names like "Rio Grande do
    Norte" or "Mato Grosso do Sul" get clipped in a select at any half-width
    column, on any screen size, so there's no safe ratio to split them at. */
-.city-state-row { display: grid; grid-template-columns: 1fr; gap: .75rem; }
+.city-state-row { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
 
 /* Generic 2/3-field form rows — stack to one column on narrow phones so
    labels and inputs never get squeezed into an unreadable/overlapping mess. */
@@ -895,10 +895,10 @@ h4 { font-size: 1rem; }
   /* Forms that pair fields side by side on desktop stack on narrow phones. */
   .form-group { min-width: 0; }
 
-  .city-state-row { gap: 1rem; }
-
-  /* Same squeeze problem as Estado/Cidade — stack any 2/3-field form row on phones. */
-  .form-row-2, .form-row-3 { grid-template-columns: 1fr; gap: 1rem; }
+  /* Same squeeze problem as Estado/Cidade — stack any 2/3-field form row on phones,
+     with the same generous gap as the rest of the form so a stacked field's label
+     never reads as glued to the field above it. */
+  .form-row-2, .form-row-3 { grid-template-columns: 1fr; gap: 1.5rem; }
 
   .search-wrapper { max-width: 100% !important; }
 

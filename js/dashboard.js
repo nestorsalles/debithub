@@ -603,7 +603,7 @@ DH.dashboard = (() => {
           <!-- Account -->
           <div class="card">
             <h3 style="margin-bottom:1.25rem;display:flex;align-items:center;gap:.5rem;"><span data-icon="user"></span> ${T('settings_account')}</h3>
-            <div class="form-group" style="margin-bottom:1rem;">
+            <div class="form-group" style="margin-bottom:1.5rem;">
               <label class="form-label">${T('field_name')}</label>
               <div style="display:flex;gap:.6rem;">
                 <input class="form-input" id="settings-name" value="${user.name}" style="flex:1;">
@@ -622,23 +622,23 @@ DH.dashboard = (() => {
           <div class="card">
             <h3 style="margin-bottom:1.25rem;display:flex;align-items:center;gap:.5rem;"><span data-icon="file-text"></span> ${T('settings_registration_data')}</h3>
 
-            <div class="form-group" style="margin-bottom:1rem;">
+            <div class="form-group" style="margin-bottom:1.5rem;">
               <label class="form-label" id="settings-doc-label">${T((user.country || 'BR') === 'BR' ? 'field_cpf' : 'field_id_number')}</label>
               <input class="form-input" value="${(user.country || 'BR') === 'BR' ? DH.data.formatCPF(user.cpf || '') : (user.cpf || '')}" disabled style="opacity:.6;cursor:not-allowed;">
               <div class="form-hint">${T('settings_document_readonly_note')}</div>
             </div>
 
-            <div class="form-group" style="margin-bottom:1rem;">
+            <div class="form-group" style="margin-bottom:1.5rem;">
               <label class="form-label">${T('field_phone')}</label>
               <input class="form-input" id="settings-phone" value="${escapeHtml(user.phone || '')}">
             </div>
 
-            <div class="form-group" style="margin-bottom:1rem;">
+            <div class="form-group" style="margin-bottom:1.5rem;">
               <label class="form-label">${T('field_country')}</label>
               <select class="form-select" id="settings-country"></select>
             </div>
 
-            <div class="city-state-row" style="margin-bottom:1rem;">
+            <div class="city-state-row" style="margin-bottom:1.5rem;">
               <div class="form-group" id="settings-state-wrap">
                 <label class="form-label">${T('credor_state')}</label>
                 <select class="form-select" id="settings-state"></select>
@@ -649,7 +649,7 @@ DH.dashboard = (() => {
               </div>
             </div>
 
-            <div class="form-row-2" style="margin-bottom:1rem;">
+            <div class="form-row-2" style="margin-bottom:1.5rem;">
               <div class="form-group">
                 <label class="form-label">${T('field_plan')}</label>
                 <select class="form-select" id="settings-plan"></select>
