@@ -691,9 +691,16 @@ h4 { font-size: 1rem; }
 /* Credores Grid */
 .credores-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.25rem; }
 
-/* Estado + Cidade pair: state always comes first (city list depends on it), and state
-   gets more width since full state names ("Rio Grande do Sul") are longer than city names. */
-.city-state-row { display: grid; grid-template-columns: 1.4fr 1fr; gap: .75rem; }
+/* Estado + Cidade pair: state always comes first (city list depends on it).
+   Always stacked (never side by side) — full state names like "Rio Grande do
+   Norte" or "Mato Grosso do Sul" get clipped in a select at any half-width
+   column, on any screen size, so there's no safe ratio to split them at. */
+.city-state-row { display: grid; grid-template-columns: 1fr; gap: .75rem; }
+
+/* Generic 2/3-field form rows — stack to one column on narrow phones so
+   labels and inputs never get squeezed into an unreadable/overlapping mess. */
+.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .75rem; }
 
 /* Credor Card */
 .credor-card {
@@ -888,10 +895,10 @@ h4 { font-size: 1rem; }
   /* Forms that pair fields side by side on desktop stack on narrow phones. */
   .form-group { min-width: 0; }
 
-  /* Estado + Cidade were clipping/misaligning at phone widths — stack them instead
-     of squeezing both into half-width columns. */
-  .city-state-row { grid-template-columns: 1fr; gap: 0; }
-  .city-state-row .form-group:first-child { margin-bottom: 1rem; }
+  .city-state-row { gap: 1rem; }
+
+  /* Same squeeze problem as Estado/Cidade — stack any 2/3-field form row on phones. */
+  .form-row-2, .form-row-3 { grid-template-columns: 1fr; gap: 1rem; }
 
   .search-wrapper { max-width: 100% !important; }
 

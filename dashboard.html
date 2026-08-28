@@ -215,7 +215,7 @@
           </select>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+        <div class="form-row-2">
           <div class="form-group">
             <label class="form-label" data-i18n="debit_date">Data de emissão</label>
             <input type="text" class="form-input" id="debit-date" data-date-field>
@@ -292,7 +292,7 @@
           <div class="form-hint" id="payment-remaining-hint"></div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+        <div class="form-row-2">
           <div class="form-group">
             <label class="form-label" data-i18n="payment_amount">Valor pago</label>
             <input type="text" class="form-input" id="payment-amount" data-money-field placeholder="0,00">
@@ -359,7 +359,7 @@ window.DH = window.DH || {};
 DH.app = {
   async logout() {
     await DH.data.session.clear();
-    window.location.href = 'index';
+    window.location.href = '/';
   }
 };
 
@@ -371,9 +371,9 @@ DH.app = {
   try {
     profile = await DH.data.bootstrap();
   } catch {
-    window.location.href = 'index'; return;
+    window.location.href = '/'; return;
   }
-  if (!profile) { window.location.href = 'index'; return; }
+  if (!profile) { window.location.href = '/'; return; }
   if (profile.role === 'admin') { window.location.href = 'admin'; return; }
 
   // Load settings

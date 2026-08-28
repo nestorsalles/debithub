@@ -649,7 +649,7 @@ DH.dashboard = (() => {
               </div>
             </div>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem;">
+            <div class="form-row-2" style="margin-bottom:1rem;">
               <div class="form-group">
                 <label class="form-label">${T('field_plan')}</label>
                 <select class="form-select" id="settings-plan"></select>
