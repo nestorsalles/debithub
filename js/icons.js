@@ -65,7 +65,13 @@ DH.icons = (() => {
   }
 
   function mount(root) {
-    (root || document).querySelectorAll('[data-icon]').forEach(el => {
+    const scope = root || document;
+    // querySelectorAll only finds DESCENDANTS — if scope itself is the icon
+    // element (e.g. DH.icons.mount(button) right after changing the button's
+    // own data-icon), it never gets included, so it silently never re-renders.
+    const descendants = scope.querySelectorAll('[data-icon]');
+    const targets = (scope.matches && scope.matches('[data-icon]')) ? [scope, ...descendants] : descendants;
+    targets.forEach(el => {
       const name = el.getAttribute('data-icon');
       if (el.getAttribute('data-icon-mounted') === name) return;
       el.innerHTML = svg(name);

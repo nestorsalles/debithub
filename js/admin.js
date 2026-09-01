@@ -859,7 +859,7 @@ DH.admin = (() => {
                 <label class="form-label">${T('field_current_password')}</label>
                 <div class="input-group">
                   <input type="password" class="form-input" id="change-current-password" autocomplete="current-password">
-                  <button type="button" class="input-action" data-password-toggle="change-current-password" data-icon="eye"></button>
+                  <button type="button" class="input-action" data-password-toggle="change-current-password" data-icon="eye-off"></button>
                 </div>
                 <span class="form-error hidden" id="change-current-password-error"></span>
               </div>
@@ -867,7 +867,7 @@ DH.admin = (() => {
                 <label class="form-label">${T('field_new_password')}</label>
                 <div class="input-group">
                   <input type="password" class="form-input" id="change-new-password" autocomplete="new-password">
-                  <button type="button" class="input-action" data-password-toggle="change-new-password" data-icon="eye"></button>
+                  <button type="button" class="input-action" data-password-toggle="change-new-password" data-icon="eye-off"></button>
                 </div>
                 <div class="password-strength">
                   <div class="password-strength-bar"><div class="password-strength-fill" id="change-strength-bar"></div></div>
@@ -879,7 +879,7 @@ DH.admin = (() => {
                 <label class="form-label">${T('field_confirm_password')}</label>
                 <div class="input-group">
                   <input type="password" class="form-input" id="change-confirm-password" autocomplete="new-password">
-                  <button type="button" class="input-action" data-password-toggle="change-confirm-password" data-icon="eye"></button>
+                  <button type="button" class="input-action" data-password-toggle="change-confirm-password" data-icon="eye-off"></button>
                 </div>
                 <span class="form-error hidden" id="change-confirm-password-error"></span>
               </div>

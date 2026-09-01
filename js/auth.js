@@ -59,10 +59,10 @@ DH.auth = (() => {
         if (!inp) return;
         if (inp.type === 'password') {
           inp.type = 'text';
-          btn.setAttribute('data-icon', 'eye-off');
+          btn.setAttribute('data-icon', 'eye');
         } else {
           inp.type = 'password';
-          btn.setAttribute('data-icon', 'eye');
+          btn.setAttribute('data-icon', 'eye-off');
         }
         btn.removeAttribute('data-icon-mounted');
         DH.icons.mount(btn);
