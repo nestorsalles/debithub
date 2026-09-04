@@ -214,6 +214,11 @@ DH.ui = (() => {
     });
   }
 
+  /* ── Feedback / support: straight to WhatsApp, no canned message ── */
+  function openFeedback() {
+    window.open('https://wa.me/5585985826124', '_blank', 'noopener');
+  }
+
   /* ── Avatar initials ── */
   function getInitials(name) {
     return (name || '?').split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
@@ -267,6 +272,7 @@ DH.ui = (() => {
     initUserDropdown,
     initSidebarNav,
     getInitials,
+    openFeedback,
     emptyState,
     fmtDate, fmtCurr,
     statusBadge, typeChip,

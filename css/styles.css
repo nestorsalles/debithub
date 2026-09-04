@@ -565,6 +565,46 @@ h4 { font-size: 1rem; }
 }
 .toggle-theme-btn:hover { border-color: var(--border); background: var(--surface-3); color: var(--text); }
 
+/* Same look as .toggle-theme-btn, kept as a separate class so the theme
+   logic's `document.querySelectorAll('.toggle-theme-btn')` (which overwrites
+   data-icon/title to sun/moon on every theme change) never touches this one. */
+.help-btn {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 1rem;
+  width: 36px; height: 36px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+}
+.help-btn:hover { border-color: var(--border); background: var(--surface-3); color: var(--text); }
+
+/* ── Guided tour: spotlight + pointing card ──
+   The "spotlight" is the classic box-shadow trick: a huge spread on the
+   target element itself darkens everything else on the page, with no
+   separate backdrop element needed. */
+.tour-spotlight {
+  position: relative;
+  z-index: 10000;
+  box-shadow: 0 0 0 4px var(--accent), 0 0 0 9999px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius);
+  transition: box-shadow 0.2s ease;
+}
+.tour-card {
+  position: fixed;
+  z-index: 10001;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 1.25rem;
+  width: 320px;
+  max-width: calc(100vw - 2rem);
+}
+
 .forgot-link { font-size: 0.82rem; color: var(--accent); cursor: pointer; white-space: nowrap; }
 .forgot-link:hover { text-decoration: underline; }
 

@@ -7,12 +7,28 @@ window.DH = window.DH || {};
 DH.debitos = (() => {
   function T(k) { return DH.i18n.t(k); }
 
+  // Sentinel value for "pay the total debt with this creditor" — not a real
+  // debit id, handled specially in savePayment() by splitting the amount
+  // across every open debit instead of writing to just one.
+  const ALL_DEBTS_VALUE = '__all__';
+
   /* ════════════════════════════
      NEW DEBIT MODAL
   ════════════════════════════ */
-  function openNewDebitModal(preselectedCreditorId) {
+  function openNewDebitModal(preselectedCreditorId, opts) {
     const overlay = document.getElementById('debit-modal-overlay');
     if (!overlay) return;
+
+    // A debit always belongs to a creditor — with none registered yet, the
+    // modal would just open on a dead-end empty dropdown. Redirect straight
+    // to "novo credor" instead so it's obvious what to do first. The guided
+    // tour opts out of this (skipGuard) since it's only showing the form,
+    // not expecting the user to actually save anything through it.
+    if (!(opts && opts.skipGuard) && !DH.data.credores.getAll(DH.state.currentUser?.id).length) {
+      DH.ui.showToast(T('toast_need_credor_first'), 'warning');
+      DH.credores.openNewModal();
+      return;
+    }
 
     document.getElementById('debit-modal-title').textContent = T('modal_new_debit');
     document.getElementById('debit-form').reset();
@@ -80,6 +96,18 @@ DH.debitos = (() => {
     debits = debits.filter(d => d.status !== 'paid');
 
     sel.innerHTML = `<option value="">${T('payment_select_debit')}</option>`;
+
+    // "Pay the total debt" option — only offered once a specific creditor is
+    // picked (it needs to know which debits to split the amount across).
+    if (creditorId && debits.length > 0) {
+      const totalRemaining = debits.reduce((s, d) => s + Math.max(0, d.amount - DH.data.pagamentos.totalPaidForDebit(d.id)), 0);
+      const opt = document.createElement('option');
+      opt.value = ALL_DEBTS_VALUE;
+      opt.textContent = `${T('payment_option_all_debts')} — ${DH.currency.format(totalRemaining, debits[0].currency)}`;
+      if (selectedId === ALL_DEBTS_VALUE) opt.selected = true;
+      sel.appendChild(opt);
+    }
+
     debits.forEach(d => {
       const opt = document.createElement('option');
       opt.value = d.id;
@@ -171,12 +199,19 @@ DH.debitos = (() => {
   /* ════════════════════════════
      PAYMENT MODAL
   ════════════════════════════ */
-  function openPaymentModal(preselectedCreditorId) {
+  function openPaymentModal(preselectedCreditorId, opts) {
     const overlay = document.getElementById('payment-modal-overlay');
     if (!overlay) return;
 
+    if (!(opts && opts.skipGuard) && !DH.data.credores.getAll(DH.state.currentUser?.id).length) {
+      DH.ui.showToast(T('toast_need_credor_first'), 'warning');
+      DH.credores.openNewModal();
+      return;
+    }
+
     document.getElementById('payment-form').reset();
     document.getElementById('payment-id').value = '';
+    document.getElementById('payment-is-general').value = '';
     document.getElementById('payment-amount').value = '';
     document.getElementById('payment-modal-title').textContent = T('modal_new_payment');
     setFieldsDisabled(false);
@@ -220,6 +255,14 @@ DH.debitos = (() => {
       const debitId = debitSel.value;
       if (!hint) return;
       if (!debitId) { hint.textContent = ''; return; }
+      if (debitId === ALL_DEBTS_VALUE) {
+        const creditorId = document.getElementById('payment-creditor')?.value;
+        const openDebits = DH.data.debitos.getByCreditor(creditorId, DH.state.currentUser?.id).filter(d => d.status !== 'paid');
+        if (!openDebits.length) { hint.textContent = ''; return; }
+        const totalRemaining = openDebits.reduce((s, d) => s + Math.max(0, d.amount - DH.data.pagamentos.totalPaidForDebit(d.id)), 0);
+        hint.textContent = `${T('payment_remaining_hint')}: ${DH.currency.format(totalRemaining, openDebits[0].currency)} (${openDebits.length} ${T('label_active_debits')})`;
+        return;
+      }
       const debit = DH.data.debitos.getById(debitId);
       if (!debit) { hint.textContent = ''; return; }
       const paid = DH.data.pagamentos.totalPaidForDebit(debitId);
@@ -245,6 +288,7 @@ DH.debitos = (() => {
 
     document.getElementById('payment-form').reset();
     document.getElementById('payment-id').value = paymentId;
+    document.getElementById('payment-is-general').value = DH.data.paymentTag.isGeneral(p.note) ? '1' : '';
     document.getElementById('payment-modal-title').textContent = T('modal_edit_payment');
     clearPaymentErrors();
 
@@ -255,7 +299,7 @@ DH.debitos = (() => {
 
     DH.moneyField.setValue(document.getElementById('payment-amount'), p.amount);
     DH.dateField.setISO(document.getElementById('payment-date'), p.date);
-    document.getElementById('payment-note').value = p.note || '';
+    document.getElementById('payment-note').value = DH.data.paymentTag.strip(p.note);
 
     DH.ui.openModal('payment-modal-overlay');
   }
@@ -286,11 +330,39 @@ DH.debitos = (() => {
     if (!date) { showPaymentErr('payment-date', T('err_required')); valid = false; }
     if (!valid) return;
 
+    const userId = DH.state.currentUser.id;
+
     if (id) {
-      await DH.data.pagamentos.update(id, { amount, date, note });
+      const isGeneral = document.getElementById('payment-is-general').value === '1';
+      const finalNote = isGeneral ? DH.data.paymentTag.tag(note) : note;
+      await DH.data.pagamentos.update(id, { amount, date, note: finalNote });
       DH.ui.showToast(T('toast_payment_updated'), 'success');
+    } else if (debitId === ALL_DEBTS_VALUE) {
+      // Split the lump sum across this creditor's open debits, oldest first —
+      // the payments table always ties a payment to one specific debit, so
+      // "pay the total" becomes several individual payments under the hood,
+      // each tagged so the history shows "Débito Geral" instead of reading
+      // as a payment toward whichever debit it happened to land on.
+      const openDebits = DH.data.debitos.getByCreditor(creditorId, userId)
+        .filter(d => d.status !== 'paid')
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+      const totalRemaining = openDebits.reduce((s, d) => s + Math.max(0, d.amount - DH.data.pagamentos.totalPaidForDebit(d.id)), 0);
+      if (amount > totalRemaining + 0.01) {
+        showPaymentErr('payment-amount', T('err_amount_exceeds_total'));
+        return;
+      }
+      const taggedNote = DH.data.paymentTag.tag(note);
+      let left = amount;
+      for (const d of openDebits) {
+        if (left <= 0) break;
+        const rem = Math.max(0, d.amount - DH.data.pagamentos.totalPaidForDebit(d.id));
+        if (rem <= 0) continue;
+        const chunk = Math.min(rem, left);
+        await DH.data.pagamentos.create(userId, { creditorId, debitId: d.id, amount: chunk, date, note: taggedNote });
+        left -= chunk;
+      }
+      DH.ui.showToast(T('toast_payment_created'), 'success');
     } else {
-      const userId = DH.state.currentUser.id;
       await DH.data.pagamentos.create(userId, { creditorId, debitId, amount, date, note });
       DH.ui.showToast(T('toast_payment_created'), 'success');
     }

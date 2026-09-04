@@ -572,6 +572,19 @@ DH.data = (() => {
     },
   };
 
+  /* "Pay the whole debt" splits one lump payment across several real debits
+     (the payments table always ties a row to one debit — there's no separate
+     "general payment" concept in the schema). To still show it as one
+     recognizable thing in the history — instead of each split chunk reading
+     as a payment toward whichever debit it landed on — a marker is tucked
+     onto the front of `note` and stripped back off for display. */
+  const GENERAL_NOTE_TAG = '##GERAL##';
+  const paymentTag = {
+    tag(note) { return GENERAL_NOTE_TAG + (note ? ' ' + note : ''); },
+    isGeneral(note) { return typeof note === 'string' && note.startsWith(GENERAL_NOTE_TAG); },
+    strip(note) { return this.isGeneral(note) ? note.slice(GENERAL_NOTE_TAG.length).trim() : (note || ''); },
+  };
+
   const PLAN_SORT_ORDER = { teste: 0, mensal: 1, trimestral: 2, semestral: 3, anual: 4 };
   function planSortKey(p) {
     if (typeof p.order === 'number') return p.order;
@@ -723,16 +736,14 @@ DH.data = (() => {
       const activeDebt = filteredDebits.filter(d => d.status !== 'paid').reduce((s, d) => s + d.amount, 0);
       const paidDebt   = filteredDebits.filter(d => d.status === 'paid').reduce((s, d) => s + d.amount, 0);
 
-      const now = new Date();
-      const thisMonthDebits = ds.filter(d => {
-        const dt = localDate(d.date);
-        return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
-      });
-      const thisMonthAmount = thisMonthDebits.reduce((s, d) => s + d.amount, 0);
+      // Net amount still owed (each debit's amount minus whatever's already been
+      // paid toward it) — not the gross total, so a partially-paid debt only
+      // counts what's actually left.
+      const balance = filteredDebits.reduce((s, d) => s + Math.max(0, d.amount - pagamentos.totalPaidForDebit(d.id)), 0);
       const creditorIds = [...new Set(filteredDebits.map(d => d.creditorId))];
 
       return {
-        totalDebt, totalPaid, activeDebt, paidDebt, thisMonth: thisMonthAmount,
+        totalDebt, totalPaid, activeDebt, paidDebt, balance,
         currency: dominantCurrency(filteredDebits),
         creditorCount: creditorIds.length, debitCount: filteredDebits.length, paymentCount: filteredPayments.length,
       };
@@ -800,7 +811,7 @@ DH.data = (() => {
   }
 
   return {
-    uuid, toSlug, users, session, credores, debitos, pagamentos, billing, plans, analytics, settings,
+    uuid, toSlug, users, session, credores, debitos, pagamentos, paymentTag, billing, plans, analytics, settings,
     isValidCPF, formatCPF, distinctCities, distinctCitiesForState, bootstrap,
   };
 })();
@@ -868,7 +879,7 @@ DH.currency = (() => {
   function format(amount, currencyCode) {
     const code = currencyCode || 'BRL';
     const cfg  = configs[code] || configs.BRL;
-    return new Intl.NumberFormat(cfg.locale, { style: 'currency', currency: cfg.currency, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount || 0);
+    return new Intl.NumberFormat(cfg.locale, { style: 'currency', currency: cfg.currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
   }
   return { format, list: () => Object.keys(configs) };
 })();
@@ -892,16 +903,21 @@ DH.dates = (() => {
   }
   function today() { return new Date().toISOString().split('T')[0]; }
 
+  /* `to` is only bounded for 'today' (which means exactly today, nothing else).
+     Every other preset only bounds how far BACK it looks — leaving `to` open
+     means a debit/payment dated a few days in the future (a due date, say)
+     never silently disappears just because it isn't in the past yet. 'all'
+     leaves both ends open. */
   function rangeFromFilter(filter) {
     const now = new Date();
-    const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-    let from;
+    let from = null, to = null;
     switch (filter) {
-      case 'today': from = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+      case 'today': from = new Date(now.getFullYear(), now.getMonth(), now.getDate()); to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59); break;
       case 'month': from = new Date(now.getFullYear(), now.getMonth(), 1); break;
       case '3m': from = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()); break;
       case '6m': from = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()); break;
       case '1y': from = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
+      case 'all': from = null; break;
       default: from = null;
     }
     return { from, to };

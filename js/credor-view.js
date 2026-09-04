@@ -18,7 +18,7 @@ DH.credorView = (() => {
   }
 
   let currentData   = null; // { credor, debtor, debits, payments }
-  let currentFilter = 'month';
+  let currentFilter = 'all';
   let customFrom    = null;
   let customTo      = null;
 
@@ -45,7 +45,7 @@ DH.credorView = (() => {
   }
 
   async function init() {
-    currentFilter = 'month'; customFrom = null; customTo = null;
+    currentFilter = 'all'; customFrom = null; customTo = null;
 
     const code = codeFromLocation();
     if (!code) { currentData = null; renderNotFound(); return; }
@@ -118,7 +118,7 @@ DH.credorView = (() => {
     return `
       <div class="filter-bar">
         <span class="filter-label">${T('filter_label')}</span>
-        ${['today','month','3m','6m','1y'].map(f => `
+        ${['all','today','month','3m','6m','1y'].map(f => `
           <button class="filter-btn ${currentFilter === f ? 'active' : ''}"
             onclick="DH.credorView.setFilter('${f}')">${T('filter_' + f)}</button>
         `).join('')}
@@ -171,11 +171,11 @@ DH.credorView = (() => {
 
       <!-- Summary Cards -->
       <div class="stats-grid">
-        <div class="stat-card" style="--accent-color:var(--danger)">
-          <div class="stat-icon" data-icon="wallet"></div>
-          <div class="stat-label">${T('pub_total')}</div>
-          <div class="stat-value" style="color:var(--danger)">${C(balance, cur)}</div>
-          <div class="stat-sub">${debitsInRange.length} ${T('label_active_debits')}</div>
+        <div class="stat-card" style="--accent-color:var(--accent)">
+          <div class="stat-icon" data-icon="dollar-sign"></div>
+          <div class="stat-label">${T('pub_active')}</div>
+          <div class="stat-value">${C(totalDebt, cur)}</div>
+          <div class="stat-sub">${T('filter_' + (currentFilter === 'custom' ? 'custom' : currentFilter))}</div>
         </div>
         <div class="stat-card" style="--accent-color:var(--success)">
           <div class="stat-icon" data-icon="check-circle"></div>
@@ -183,11 +183,11 @@ DH.credorView = (() => {
           <div class="stat-value" style="color:var(--success)">${C(totalPaid, cur)}</div>
           <div class="stat-sub">${paymentsInRange.length} ${T('label_payments')}</div>
         </div>
-        <div class="stat-card" style="--accent-color:var(--accent)">
-          <div class="stat-icon" data-icon="dollar-sign"></div>
-          <div class="stat-label">${T('pub_active')}</div>
-          <div class="stat-value">${C(totalDebt, cur)}</div>
-          <div class="stat-sub">${T('filter_' + (currentFilter === 'custom' ? 'custom' : currentFilter))}</div>
+        <div class="stat-card" style="--accent-color:var(--danger)">
+          <div class="stat-icon" data-icon="wallet"></div>
+          <div class="stat-label">${T('pub_total')}</div>
+          <div class="stat-value" style="color:var(--danger)">${C(balance, cur)}</div>
+          <div class="stat-sub">${debitsInRange.length} ${T('label_active_debits')}</div>
         </div>
       </div>
 
@@ -231,7 +231,8 @@ DH.credorView = (() => {
           <div class="debit-item-meta">
             ${DH.ui.typeChip(d.type, d.installments)} ${categoryChip(d.category)}
             · ${DH.dates.formatDate(d.date)}
-            ${d.type === 'installment' ? `<br><span class="text-xs" style="color:var(--success)">${T('debit_paid_amount')}: ${C(paid, d.currency)} · ${T('debit_remaining')}: ${C(rem, d.currency)}</span>` : ''}
+            ${d.type === 'installment' ? `<br><span class="text-xs" style="color:var(--success)">${T('debit_paid_amount')}: ${C(paid, d.currency)} · ${T('debit_remaining')}: ${C(rem, d.currency)}</span>
+            <br><span class="text-xs text-muted">${T('debit_installment_value')}: ${C(d.installmentAmount, d.currency)}</span>` : ''}
           </div>
         </div>
         <div class="debit-item-right">
@@ -272,12 +273,15 @@ DH.credorView = (() => {
               <tbody>
                 ${sorted.map(p => {
                   const deb = debitMap[p.debitId];
+                  const isGeneral = DH.data.paymentTag.isGeneral(p.note);
+                  const desc = isGeneral ? T('debit_general_label') : (deb ? deb.description : '—');
+                  const noteText = DH.data.paymentTag.strip(p.note);
                   return `
                     <tr>
-                      <td><strong>${deb ? deb.description : '—'}</strong></td>
+                      <td><strong>${desc}</strong></td>
                       <td>${DH.dates.formatDate(p.date)}</td>
                       <td style="color:var(--success);font-weight:700;">+ ${C(p.amount, deb ? deb.currency : 'BRL')}</td>
-                      <td class="text-muted">${p.note || '—'}</td>
+                      <td class="text-muted">${noteText || '—'}</td>
                     </tr>
                   `;
                 }).join('')}

@@ -8,7 +8,7 @@ window.DH = window.DH || {};
 
 DH.dashboard = (() => {
   let currentView    = 'overview';
-  let currentFilter  = 'month';
+  let currentFilter  = 'all';
   let customFrom     = null;
   let customTo       = null;
   let selectedCreditorId = null;
@@ -110,7 +110,7 @@ DH.dashboard = (() => {
         <!-- Filter Bar -->
         <div class="filter-bar">
           <span class="filter-label">${T('filter_label')}</span>
-          ${['today','month','3m','6m','1y'].map(f => `
+          ${['all','today','month','3m','6m','1y'].map(f => `
             <button class="filter-btn ${currentFilter === f ? 'active' : ''}"
               onclick="DH.dashboard.setFilter('${f}')">${T('filter_' + f)}</button>
           `).join('')}
@@ -129,10 +129,10 @@ DH.dashboard = (() => {
 
         <!-- Stats -->
         <div class="stats-grid" style="margin-bottom:2rem;">
-          <div class="stat-card" style="--accent-color: var(--danger)">
-            <div class="stat-icon" data-icon="wallet"></div>
-            <div class="stat-label">${T('stat_total_debt')}</div>
-            <div class="stat-value" style="color:var(--danger)">${C(s.activeDebt, s.currency)}</div>
+          <div class="stat-card" style="--accent-color: var(--warning)">
+            <div class="stat-icon" data-icon="calendar"></div>
+            <div class="stat-label">${T('stat_this_month')}</div>
+            <div class="stat-value" style="color:var(--warning)">${C(s.balance, s.currency)}</div>
             <div class="stat-sub">${s.debitCount} ${T('label_active_debits')}</div>
           </div>
           <div class="stat-card" style="--accent-color: var(--success)">
@@ -141,11 +141,11 @@ DH.dashboard = (() => {
             <div class="stat-value" style="color:var(--success)">${C(s.totalPaid, s.currency)}</div>
             <div class="stat-sub">${s.paymentCount} ${T('label_payments')}</div>
           </div>
-          <div class="stat-card" style="--accent-color: var(--warning)">
-            <div class="stat-icon" data-icon="calendar"></div>
-            <div class="stat-label">${T('stat_this_month')}</div>
-            <div class="stat-value" style="color:var(--warning)">${C(s.thisMonth, s.currency)}</div>
-            <div class="stat-sub">${new Date().toLocaleDateString(DH.state.language === 'pt' ? 'pt-BR' : 'en-US', {month:'long', year:'numeric'})}</div>
+          <div class="stat-card" style="--accent-color: var(--danger)">
+            <div class="stat-icon" data-icon="wallet"></div>
+            <div class="stat-label">${T('stat_total_debt')}</div>
+            <div class="stat-value" style="color:var(--danger)">${C(s.activeDebt, s.currency)}</div>
+            <div class="stat-sub">${s.debitCount} ${T('label_active_debits')}</div>
           </div>
           <div class="stat-card" style="--accent-color: var(--accent)">
             <div class="stat-icon" data-icon="users"></div>
@@ -253,6 +253,7 @@ DH.dashboard = (() => {
           </div>
           <div class="flex justify-between mt-1">
             <span class="text-xs text-muted">${T('credor_total')}: ${C(s.totalDebt, s.currency)}</span>
+            <span class="text-xs text-muted">${s.debitCount} ${T('label_debit_count')}</span>
             <span class="text-xs text-muted">${pct.toFixed(0)}% ${T('label_percent_paid')}</span>
           </div>
         </div>
@@ -314,17 +315,17 @@ DH.dashboard = (() => {
 
         <!-- Stats -->
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;text-align:center;">
-          <div style="background:var(--danger-dim);border-radius:var(--radius);padding:.85rem;">
-            <div class="text-xs text-muted">${T('credor_total')}</div>
-            <div style="font-weight:800;color:var(--danger);font-size:1rem;">${C(s.totalDebt, s.currency)}</div>
+          <div style="background:var(--warning-dim);border-radius:var(--radius);padding:.85rem;">
+            <div class="text-xs text-muted">${T('credor_balance')}</div>
+            <div style="font-weight:800;color:var(--warning);font-size:1rem;">${C(s.balance, s.currency)}</div>
           </div>
           <div style="background:var(--success-dim);border-radius:var(--radius);padding:.85rem;">
             <div class="text-xs text-muted">${T('credor_paid')}</div>
             <div style="font-weight:800;color:var(--success);font-size:1rem;">${C(s.totalPaid, s.currency)}</div>
           </div>
-          <div style="background:var(--warning-dim);border-radius:var(--radius);padding:.85rem;">
-            <div class="text-xs text-muted">${T('credor_balance')}</div>
-            <div style="font-weight:800;color:var(--warning);font-size:1rem;">${C(s.balance, s.currency)}</div>
+          <div style="background:var(--danger-dim);border-radius:var(--radius);padding:.85rem;">
+            <div class="text-xs text-muted">${T('credor_total')}</div>
+            <div style="font-weight:800;color:var(--danger);font-size:1rem;">${C(s.totalDebt, s.currency)}</div>
           </div>
         </div>
 
@@ -368,7 +369,8 @@ DH.dashboard = (() => {
                         <div class="debit-item-desc">${d.description}</div>
                         <div class="debit-item-meta">
                           ${DH.ui.typeChip(d.type, d.installments)} ${categoryChip(d.category)} · ${DH.ui.fmtDate(d.date)}
-                          ${d.type === 'installment' ? `<br><span class="text-xs" style="color:var(--success)">${T('debit_paid_amount')}: ${C(paid, d.currency)} · ${T('debit_remaining')}: ${C(rem, d.currency)}</span>` : ''}
+                          ${d.type === 'installment' ? `<br><span class="text-xs" style="color:var(--success)">${T('debit_paid_amount')}: ${C(paid, d.currency)} · ${T('debit_remaining')}: ${C(rem, d.currency)}</span>
+                          <br><span class="text-xs text-muted">${T('debit_installment_value')}: ${C(d.installmentAmount, d.currency)}</span>` : ''}
                         </div>
                       </div>
                       <div class="debit-item-right">
@@ -400,12 +402,15 @@ DH.dashboard = (() => {
             : `<div style="display:flex;flex-direction:column;gap:.5rem;">
                 ${payments.sort((a,b) => new Date(b.date) - new Date(a.date)).map(p => {
                   const deb = DH.data.debitos.getById(p.debitId);
+                  const isGeneral = DH.data.paymentTag.isGeneral(p.note);
+                  const desc = isGeneral ? T('debit_general_label') : (deb ? deb.description : '—');
+                  const noteText = DH.data.paymentTag.strip(p.note);
                   return `
                     <div class="payment-item">
                       <div class="payment-icon" data-icon="dollar-sign"></div>
                       <div class="payment-body">
-                        <div class="payment-desc">${deb ? deb.description : '—'}</div>
-                        <div class="payment-date">${DH.ui.fmtDate(p.date)}${p.note ? ' · ' + p.note : ''}</div>
+                        <div class="payment-desc">${desc}</div>
+                        <div class="payment-date">${DH.ui.fmtDate(p.date)}${noteText ? ' · ' + noteText : ''}</div>
                       </div>
                       <div class="payment-amount">+ ${C(p.amount, deb ? deb.currency : 'BRL')}</div>
                       <div style="display:flex;gap:.3rem;">
@@ -559,13 +564,16 @@ DH.dashboard = (() => {
                   ${payments.sort((a,b) => new Date(b.date) - new Date(a.date)).map(p => {
                     const deb  = DH.data.debitos.getById(p.debitId);
                     const cred = creditorMap[p.creditorId];
+                    const isGeneral = DH.data.paymentTag.isGeneral(p.note);
+                    const desc = isGeneral ? T('debit_general_label') : (deb ? deb.description : '—');
+                    const noteText = DH.data.paymentTag.strip(p.note);
                     return `
                       <tr>
-                        <td><strong>${deb ? deb.description : '—'}</strong></td>
+                        <td><strong>${desc}</strong></td>
                         <td>${cred ? cred.name : '—'}</td>
                         <td>${DH.ui.fmtDate(p.date)}</td>
                         <td style="color:var(--success);font-weight:700;">${C(p.amount, deb ? deb.currency : 'BRL')}</td>
-                        <td class="text-muted">${p.note || '—'}</td>
+                        <td class="text-muted">${noteText || '—'}</td>
                         <td>
                           <div style="display:flex;gap:.3rem;">
                             <button class="btn-icon" title="${T('payment_edit')}"

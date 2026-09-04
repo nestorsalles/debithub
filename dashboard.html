@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="DebitHub — Dashboard de controle de débitos pessoais.">
   <title>Dashboard — DebitHub</title>
-  <link rel="stylesheet" href="css/styles.css?v=20260901">
+  <link rel="stylesheet" href="css/styles.css?v=20260902">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
 </head>
 <body>
@@ -35,7 +35,8 @@
       <option value="pt">PT</option>
       <option value="en">EN</option>
     </select>
-    <button class="toggle-theme-btn" onclick="DH.ui.toggleTheme()" title="Alternar tema" data-icon="sun"></button>
+    <button class="help-btn" id="tour-help-btn" onclick="DH.tour.start()" title="Ajuda / Tutorial" data-icon="help-circle"></button>
+    <button class="toggle-theme-btn" id="theme-toggle-btn" onclick="DH.ui.toggleTheme()" title="Alternar tema" data-icon="sun"></button>
 
     <div class="header-user">
       <div class="user-avatar" id="user-avatar-btn" title="Minha conta">?</div>
@@ -84,15 +85,15 @@
 
   <span class="nav-section-label" style="margin-top:auto" data-i18n="nav_quick_actions">Ações rápidas</span>
 
-  <button class="nav-item" onclick="DH.credores.openNewModal()">
+  <button class="nav-item" id="nav-new-credor" onclick="DH.credores.openNewModal()">
     <span class="nav-icon" data-icon="plus"></span>
     <span data-i18n="btn_new_credor">+ Novo credor</span>
   </button>
-  <button class="nav-item" onclick="DH.debitos.openNewDebitModal()">
+  <button class="nav-item" id="nav-new-debit" onclick="DH.debitos.openNewDebitModal()">
     <span class="nav-icon" data-icon="file-plus"></span>
     <span data-i18n="btn_new_debit">+ Novo débito</span>
   </button>
-  <button class="nav-item" onclick="DH.debitos.openPaymentModal()">
+  <button class="nav-item" id="nav-new-payment" onclick="DH.debitos.openPaymentModal()">
     <span class="nav-icon" data-icon="dollar-sign"></span>
     <span data-i18n="btn_new_payment">+ Registrar pagamento</span>
   </button>
@@ -102,6 +103,10 @@
   <button class="nav-item" data-view="settings">
     <span class="nav-icon" data-icon="settings"></span>
     <span data-i18n="nav_settings">Configurações</span>
+  </button>
+  <button class="nav-item" id="nav-feedback" onclick="DH.ui.openFeedback()">
+    <span class="nav-icon" data-icon="message-circle"></span>
+    <span data-i18n="nav_feedback">Feedback e Suporte</span>
   </button>
   <button class="nav-item" onclick="DH.app.logout()" style="color:var(--danger);">
     <span class="nav-icon" data-icon="log-out"></span>
@@ -144,18 +149,18 @@
       <input type="hidden" id="credor-id">
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label" data-i18n="credor_name">Nome do credor</label>
+          <label class="form-label"><span data-i18n="credor_name">Nome do credor</span> <span class="req-mark">*</span></label>
           <input type="text" class="form-input" id="credor-name" placeholder="Ex: João Silva">
           <span class="form-error hidden" id="credor-name-error"></span>
         </div>
         <div class="city-state-row">
           <div class="form-group">
-            <label class="form-label" data-i18n="credor_state">Estado</label>
+            <label class="form-label"><span data-i18n="credor_state">Estado</span> <span class="req-mark">*</span></label>
             <select class="form-select" id="credor-state"></select>
             <span class="form-error hidden" id="credor-state-error"></span>
           </div>
           <div class="form-group">
-            <label class="form-label" data-i18n="credor_city">Cidade</label>
+            <label class="form-label"><span data-i18n="credor_city">Cidade</span> <span class="req-mark">*</span></label>
             <input type="text" class="form-input" id="credor-city" list="city-datalist">
             <span class="form-error hidden" id="credor-city-error"></span>
           </div>
@@ -186,7 +191,7 @@
       <input type="hidden" id="debit-id">
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label" data-i18n="debit_creditor">Credor</label>
+          <label class="form-label"><span data-i18n="debit_creditor">Credor</span> <span class="req-mark">*</span></label>
           <select class="form-select" id="debit-creditor">
             <option value="">Selecione um credor</option>
           </select>
@@ -194,7 +199,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" data-i18n="debit_description">Descrição</label>
+          <label class="form-label"><span data-i18n="debit_description">Descrição</span> <span class="req-mark">*</span></label>
           <input type="text" class="form-input" id="debit-description"
             placeholder="Ex: Empréstimo para celular">
           <span class="form-error hidden" id="debit-description-error"></span>
@@ -205,24 +210,24 @@
           <select class="form-select" id="debit-category">
             <option value="" data-i18n="debit_select_category">Sem categoria</option>
             <option value="food" data-i18n="category_food">Alimentação</option>
-            <option value="transport" data-i18n="category_transport">Transporte</option>
-            <option value="health" data-i18n="category_health">Saúde</option>
-            <option value="housing" data-i18n="category_housing">Moradia</option>
-            <option value="leisure" data-i18n="category_leisure">Lazer</option>
             <option value="education" data-i18n="category_education">Educação</option>
             <option value="investment" data-i18n="category_investment">Investimento</option>
+            <option value="leisure" data-i18n="category_leisure">Lazer</option>
+            <option value="housing" data-i18n="category_housing">Moradia</option>
             <option value="other" data-i18n="category_other">Outros</option>
+            <option value="health" data-i18n="category_health">Saúde</option>
+            <option value="transport" data-i18n="category_transport">Transporte</option>
           </select>
         </div>
 
         <div class="form-row-2">
           <div class="form-group">
-            <label class="form-label" data-i18n="debit_date">Data de emissão</label>
+            <label class="form-label"><span data-i18n="debit_date">Data de emissão</span> <span class="req-mark">*</span></label>
             <input type="text" class="form-input" id="debit-date" data-date-field>
             <span class="form-error hidden" id="debit-date-error"></span>
           </div>
           <div class="form-group">
-            <label class="form-label" data-i18n="debit_amount">Valor</label>
+            <label class="form-label"><span data-i18n="debit_amount">Valor</span> <span class="req-mark">*</span></label>
             <input type="text" class="form-input" id="debit-amount" data-money-field placeholder="0,00">
             <span class="form-error hidden" id="debit-amount-error"></span>
           </div>
@@ -248,7 +253,7 @@
         </div>
 
         <div class="form-group hidden" id="installment-row">
-          <label class="form-label" data-i18n="debit_installments">Número de parcelas</label>
+          <label class="form-label"><span data-i18n="debit_installments">Número de parcelas</span> <span class="req-mark">*</span></label>
           <input type="number" class="form-input" id="debit-installments"
             placeholder="Ex: 12" min="2" max="360" step="1">
           <div class="form-hint" id="debit-installment-value"></div>
@@ -274,9 +279,10 @@
     </div>
     <form id="payment-form" novalidate>
       <input type="hidden" id="payment-id">
+      <input type="hidden" id="payment-is-general" value="">
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label" data-i18n="debit_creditor">Credor</label>
+          <label class="form-label"><span data-i18n="debit_creditor">Credor</span> <span class="req-mark">*</span></label>
           <select class="form-select" id="payment-creditor">
             <option value="">Selecione um credor</option>
           </select>
@@ -284,7 +290,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" data-i18n="payment_debit">Débito</label>
+          <label class="form-label"><span data-i18n="payment_debit">Débito</span> <span class="req-mark">*</span></label>
           <select class="form-select" id="payment-debit">
             <option value="">Selecione um débito</option>
           </select>
@@ -294,12 +300,12 @@
 
         <div class="form-row-2">
           <div class="form-group">
-            <label class="form-label" data-i18n="payment_amount">Valor pago</label>
+            <label class="form-label"><span data-i18n="payment_amount">Valor pago</span> <span class="req-mark">*</span></label>
             <input type="text" class="form-input" id="payment-amount" data-money-field placeholder="0,00">
             <span class="form-error hidden" id="payment-amount-error"></span>
           </div>
           <div class="form-group">
-            <label class="form-label" data-i18n="payment_date">Data</label>
+            <label class="form-label"><span data-i18n="payment_date">Data</span> <span class="req-mark">*</span></label>
             <input type="text" class="form-input" id="payment-date" data-date-field>
             <span class="form-error hidden" id="payment-date-error"></span>
           </div>
@@ -338,20 +344,43 @@
 </div>
 
 <!-- ═══════════════════════════════════════
+     WELCOME PROMPT (first access only)
+═══════════════════════════════════════ -->
+<div class="modal-overlay modal-sm" id="welcome-modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title"><span data-icon="help-circle"></span> Bem-vindo ao DebitHub!</h2>
+      <button class="modal-close" onclick="DH.tour.dismissWelcome()" data-icon="x"></button>
+    </div>
+    <div class="modal-body">
+      <p class="text-small">Quer um tour guiado rápido para aprender a usar o sistema? Leva menos de 2 minutos e mostra tudo, do cadastro do credor ao registro de pagamentos.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="DH.tour.dismissWelcome()">Agora não</button>
+      <button class="btn btn-primary" onclick="DH.tour.startFromWelcome()">Sim, me mostre</button>
+    </div>
+  </div>
+</div>
+
+<!-- The guided tour itself has no static modal — DH.tour builds a small
+     floating card next to whatever real element each step points at
+     (see js/tour.js), instead of a centered modal that would cover it. -->
+<!-- ═══════════════════════════════════════
      SCRIPTS
 ═══════════════════════════════════════ -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/supabase-client.js?v=20260901"></script>
-<script src="js/icons.js?v=20260901"></script>
-<script src="js/date-field.js?v=20260901"></script>
-<script src="js/money-field.js?v=20260901"></script>
-<script src="js/i18n.js?v=20260901"></script>
-<script src="js/data.js?v=20260901"></script>
-<script src="js/ui.js?v=20260901"></script>
-<script src="js/auth.js?v=20260901"></script>
-<script src="js/credores.js?v=20260901"></script>
-<script src="js/debitos.js?v=20260901"></script>
-<script src="js/dashboard.js?v=20260901"></script>
+<script src="js/supabase-client.js?v=20260902"></script>
+<script src="js/icons.js?v=20260902"></script>
+<script src="js/date-field.js?v=20260902"></script>
+<script src="js/money-field.js?v=20260902"></script>
+<script src="js/i18n.js?v=20260902"></script>
+<script src="js/data.js?v=20260902"></script>
+<script src="js/ui.js?v=20260902"></script>
+<script src="js/auth.js?v=20260902"></script>
+<script src="js/credores.js?v=20260902"></script>
+<script src="js/debitos.js?v=20260902"></script>
+<script src="js/dashboard.js?v=20260902"></script>
+<script src="js/tour.js?v=20260902"></script>
 
 <script>
 // ── App Bootstrap ──
@@ -413,6 +442,9 @@ DH.app = {
 
   // Render dashboard
   DH.dashboard.renderAll();
+
+  // First-time visitors get asked if they want a guided tour
+  DH.tour.maybeShowWelcome();
 
   // Global ESC handler for panels
   document.addEventListener('keydown', e => {
