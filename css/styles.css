@@ -996,6 +996,7 @@ h4 { font-size: 1rem; }
 .app-footer { text-align: center; padding: 1.5rem; font-size: 0.78rem; color: var(--text-muted); border-top: 1px solid var(--border-soft); margin-top: auto; }
 .app-footer a { color: var(--text-muted); text-decoration: none; transition: color var(--transition-fast); }
 .app-footer a:hover { color: var(--accent); }
+.app-footer-version { margin-top: 0.25rem; font-size: 0.7rem; opacity: 0.6; }
 
 /* ── Password strength ── */
 .password-strength { margin-top: 0.35rem; }
