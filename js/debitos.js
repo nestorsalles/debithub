@@ -84,16 +84,22 @@ DH.debitos = (() => {
     });
   }
 
-  /* ── Populate debit select for payment ── */
+  /* ── Populate debit select for payment ──
+     Requires a creditor to already be picked — without one there's no way
+     to know which creditor's debits to show, so it stays empty/disabled
+     rather than dumping every debit from every creditor into one list. */
   function populateDebitSelect(selectId, creditorId, selectedId) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
 
-    let debits = creditorId
-      ? DH.data.debitos.getByCreditor(creditorId, DH.state.currentUser?.id)
-      : DH.data.debitos.getAll(DH.state.currentUser?.id);
+    if (!creditorId) {
+      sel.innerHTML = `<option value="">${T('payment_select_creditor_first')}</option>`;
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
 
-    debits = debits.filter(d => d.status !== 'paid');
+    let debits = DH.data.debitos.getByCreditor(creditorId, DH.state.currentUser?.id).filter(d => d.status !== 'paid');
 
     sel.innerHTML = `<option value="">${T('payment_select_debit')}</option>`;
 
@@ -231,9 +237,6 @@ DH.debitos = (() => {
       credSel.onchange = updateDebits;
       updateDebits();
     }
-
-    populateDebitSelect('payment-debit', preselectedCreditorId || null, null);
-    setupDebitRemainingHint();
 
     DH.ui.openModal('payment-modal-overlay');
   }
